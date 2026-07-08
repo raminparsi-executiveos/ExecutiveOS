@@ -1,0 +1,11 @@
+.venv
+node_modules
+executiveos.db
+__pycache__/
+.pytest_cache/
+dist/
+*.pyc
+*.pyo
+*.pyd
+.env
+.DS_Store
