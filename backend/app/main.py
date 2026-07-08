@@ -95,7 +95,9 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
     haystack = " ".join(_stringify_value(getattr(record, field, "")) for field in fields).lower()
     if not query:
         return 0
-    if query.lower() in haystack:
+    normalized_haystack = " ".join(re.findall(r"[a-z0-9]+", haystack))
+    normalized_phrase = " ".join(re.findall(r"[a-z0-9]+", query.lower()))
+    if normalized_phrase and re.search(rf"(?:^| ){re.escape(normalized_phrase)}(?: |$)", normalized_haystack):
         return 20
 
     normalized_query = query.lower()
@@ -105,6 +107,7 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
         "role", "s", "the", "to", "we", "what", "why", "with",
     }
     tokens = set(re.findall(r"[a-z0-9]+", normalized_query)) - stop_words
+    haystack_tokens = set(re.findall(r"[a-z0-9]+", haystack))
     synonyms = {
         "promote": ["promotion", "promoted"],
         "promoted": ["promotion", "promote"],
@@ -113,11 +116,11 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
     }
     score = 0
     for token in tokens:
-        if token in haystack:
+        if token in haystack_tokens:
             score += 3
             continue
         for synonym in synonyms.get(token, []):
-            if synonym in haystack:
+            if synonym in haystack_tokens:
                 score += 3
                 break
     return score

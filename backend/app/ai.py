@@ -61,6 +61,9 @@ dates when present. Use ISO dates when the date is explicit. Do not create tasks
 notes. Put useful missing-context questions in follow_ups. Never invent facts.
 Treat explicit corrections as authoritative. In phrases such as "X, not Y", never
 assign Y. A person update that changes employment must include the corrected company.
+Treat similar names as distinct identities unless the user explicitly says they are
+aliases. Never expand a short name (for example, Juli) into another name (Juliana or
+Julio). When the user distinguishes two people, create/update the exact stated name.
 """
 
 

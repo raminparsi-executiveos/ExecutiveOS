@@ -53,3 +53,20 @@ def test_briefing_and_meeting_prep_and_search_work():
     assert company_search['results'][0]['title'] == 'Julio'
     assert 'at PEC' in company_search['answer']
     assert 'EverPole' not in [result['title'] for result in company_search['results']]
+
+    for name, role in [('Juli', 'Operations Analyst'), ('Juliana Gomez', 'Lead Designer')]:
+        response = client.post(
+            '/capture/confirm',
+            json={
+                'text': f'{name} is a distinct person with the role {role}.',
+                'approved_updates': [{'type': 'person', 'name': name, 'role': role}],
+            },
+        )
+        assert response.status_code == 200
+
+    juli_search = client.post('/search', json={'query': "What is Juli's role?"}).json()
+    assert juli_search['results'][0]['title'] == 'Juli'
+    assert juli_search['answer'] == 'Operations Analyst'
+    returned_names = [result['title'] for result in juli_search['results']]
+    assert 'Julio' not in returned_names
+    assert 'Juliana Gomez' not in returned_names
