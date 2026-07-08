@@ -18,11 +18,28 @@ let searchQuery = 'Why did we promote Julio?';
 let captureResult = null;
 let classificationResult = null;
 let selectedUpdateIndices = [];
+let apiError = null;
+
+async function safeJsonFetch(url, options) {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok) {
+    const bodyText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${bodyText}`);
+  }
+  if (!contentType.includes('application/json')) {
+    const bodyText = await response.text();
+    throw new Error(`Expected JSON but got ${contentType}: ${bodyText}`);
+  }
+  return await response.json();
+}
 
 function render() {
   app.innerHTML = `
     <h1>ExecutiveOS</h1>
     <p>AI-first executive memory and decision platform.</p>
+${apiError ? `      <div style="border:1px solid #d00; padding:12px; margin-bottom:16px; background:#fee;"><strong>API error:</strong> ${apiError}</div>
+` : ''}`
     <nav>
       ${sections.map((section) => `<button class="${section.key === active ? 'active' : ''}" data-key="${section.key}">${section.label}</button>`).join('')}
     </nav>
@@ -49,14 +66,18 @@ function render() {
     }
     if (button) {
       button.addEventListener('click', async () => {
-        const classifyResponse = await fetch(apiUrl('/capture/classify'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: captureText, confirm: true }),
-        });
-        classificationResult = await classifyResponse.json();
-        selectedUpdateIndices = (classificationResult.suggested_updates || []).map((_, index) => index);
-        captureResult = null;
+        try {
+          classificationResult = await safeJsonFetch(apiUrl('/capture/classify'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: captureText, confirm: true }),
+          });
+          selectedUpdateIndices = (classificationResult.suggested_updates || []).map((_, index) => index);
+          captureResult = null;
+          apiError = null;
+        } catch (error) {
+          setApiError(error.message);
+        }
         render();
       });
     }
@@ -64,16 +85,20 @@ function render() {
     const confirmButton = app.querySelector('#capture-confirm');
     if (confirmButton) {
       confirmButton.addEventListener('click', async () => {
-        const approvedUpdates = (classificationResult?.suggested_updates || []).filter((_, index) => selectedUpdateIndices.includes(index));
-        const confirmResponse = await fetch(apiUrl('/capture/confirm'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: captureText,
-            approved_updates: approvedUpdates,
-          }),
-        });
-        captureResult = await confirmResponse.json();
+        try {
+          const approvedUpdates = (classificationResult?.suggested_updates || []).filter((_, index) => selectedUpdateIndices.includes(index));
+          captureResult = await safeJsonFetch(apiUrl('/capture/confirm'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: captureText,
+              approved_updates: approvedUpdates,
+            }),
+          });
+          apiError = null;
+        } catch (error) {
+          setApiError(error.message);
+        }
         render();
       });
     }
@@ -96,13 +121,17 @@ function render() {
     const button = app.querySelector('#prep-submit');
     if (button) {
       button.addEventListener('click', async () => {
-        const input = app.querySelector('#prep-input');
-        const response = await fetch(apiUrl('/meeting-prep'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ meeting: input.value || 'Executive meeting' }),
-        });
-        meetingPrep = await response.json();
+        try {
+          const input = app.querySelector('#prep-input');
+          meetingPrep = await safeJsonFetch(apiUrl('/meeting-prep'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting: input.value || 'Executive meeting' }),
+          });
+          apiError = null;
+        } catch (error) {
+          setApiError(error.message);
+        }
         render();
       });
     }
@@ -119,16 +148,25 @@ function render() {
     }
     if (button) {
       button.addEventListener('click', async () => {
-        const response = await fetch(apiUrl('/search'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: searchQuery || 'Why did we promote Julio?' }),
-        });
-        searchResults = await response.json();
+        try {
+          searchResults = await safeJsonFetch(apiUrl('/search'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: searchQuery || 'Why did we promote Julio?' }),
+          });
+          apiError = null;
+        } catch (error) {
+          setApiError(error.message);
+        }
         render();
       });
     }
   }
+}
+
+function setApiError(error) {
+  apiError = error;
+  render();
 }
 
 function renderPanel() {
