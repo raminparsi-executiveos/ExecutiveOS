@@ -29,3 +29,9 @@ def test_people_can_be_created_and_listed():
     data = list_response.json()
     assert data['items']
     assert any(item['name'] == 'Mina' for item in data['items'])
+
+
+def test_objects_reject_unknown_fields():
+    response = client.post('/objects/people', json={'attributes': {'name': 'Kai', 'admin': True}})
+    assert response.status_code == 422
+    assert response.json()['detail'] == 'Unknown fields: admin'

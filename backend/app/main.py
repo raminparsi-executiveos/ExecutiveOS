@@ -1,10 +1,14 @@
 import re
+from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from .ai import SuggestedUpdate, analyze_capture
 from .database import Base, engine, get_db
 from .models import Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue
 from .schemas import (
@@ -17,9 +21,18 @@ from .schemas import (
 )
 from .seed import seed_data
 
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    db = next(get_db())
+    try:
+        seed_data(db)
+    finally:
+        db.close()
+    yield
 
-app = FastAPI(title="ExecutiveOS API")
+
+app = FastAPI(title="ExecutiveOS API", lifespan=lifespan)
 
 OBJECT_MODEL_MAP = {
     "companies": Company,
@@ -131,14 +144,14 @@ def _upsert_decision(db: Session, title: str, company: str, context: str, final_
     decision.context = context or decision.context
     decision.final_decision = final_decision or decision.final_decision
     decision.reasoning = reasoning or decision.reasoning
-    decision.date = decision.date or "2026-07-07"
+    decision.date = decision.date or date.today().isoformat()
     db.add(decision)
     db.commit()
     db.refresh(decision)
     return decision
 
 
-def _classify_capture_text(text: str) -> list[dict[str, Any]]:
+def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
     lowered = text.lower()
     updates: list[dict[str, Any]] = []
     detected_name = ""
@@ -187,7 +200,53 @@ def _classify_capture_text(text: str) -> list[dict[str, Any]]:
     return updates
 
 
-def _apply_approved_updates(db: Session, text: str, approved_updates: list[dict[str, Any]]) -> None:
+def _memory_context(db: Session) -> str:
+    companies = ", ".join(company.name for company in db.query(Company).all()) or "None"
+    people = ", ".join(person.name for person in db.query(Person).all()) or "None"
+    issues = ", ".join(issue.title for issue in db.query(StrategicIssue).all()) or "None"
+    return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}"
+
+
+def _classify_capture_text(db: Session, text: str) -> tuple[list[dict[str, Any]], list[str], str]:
+    analysis = analyze_capture(text, _memory_context(db))
+    if analysis:
+        return (
+            [update.model_dump() for update in analysis.suggested_updates],
+            analysis.follow_ups,
+            "ai",
+        )
+    return _fallback_classify_capture_text(text), [], "local_fallback"
+
+
+def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
+    model = {
+        "project": Project,
+        "meeting": Meeting,
+        "sop": SOP,
+        "document": Document,
+        "metric": Metric,
+    }.get(update.get("type"))
+    if not model:
+        return False
+
+    identity_field = "name" if "name" in model.__table__.columns else "title"
+    identity = update.get(identity_field) or update.get("title") or update.get("name")
+    if not identity:
+        return True
+    instance = db.query(model).filter(getattr(model, identity_field).ilike(identity)).first()
+    if not instance:
+        instance = model(**{identity_field: identity})
+    allowed = {column.name for column in model.__table__.columns} - {"id", identity_field}
+    for field in allowed:
+        value = update.get(field)
+        if value not in (None, "", []):
+            setattr(instance, field, value)
+    db.add(instance)
+    db.commit()
+    return True
+
+
+def _apply_approved_updates(db: Session, text: str, approved_updates: list[SuggestedUpdate | dict[str, Any]]) -> None:
     lowered = text.lower()
     detected_name = ""
     for candidate in ["Julio", "Mina"]:
@@ -201,31 +260,67 @@ def _apply_approved_updates(db: Session, text: str, approved_updates: list[dict[
             detected_company = candidate
             break
 
-    for update in approved_updates:
+    for raw_update in approved_updates:
+        update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
         update_type = update.get("type")
-        if update_type == "person" and detected_name:
-            _upsert_person(db, name=detected_name, company=detected_company, responsibilities=["PM quality"] if "pm quality" in lowered else [], current_priorities=["Improve PM quality"] if "pm quality" in lowered else [])
+        update_name = update.get("name") or detected_name
+        update_company = update.get("company") or detected_company
+        if update_type == "person" and update_name:
+            _upsert_person(
+                db,
+                name=update_name,
+                company=update_company,
+                responsibilities=update.get("responsibilities") or (["PM quality"] if "pm quality" in lowered else []),
+                current_priorities=update.get("current_priorities") or (["Improve PM quality"] if "pm quality" in lowered else []),
+            )
+            person = db.query(Person).filter(Person.name.ilike(update_name)).first()
+            if person and update.get("role"):
+                person.role = update["role"]
+            if person:
+                for field in ("strengths", "concerns", "performance_notes"):
+                    values = update.get(field) or []
+                    if values:
+                        setattr(person, field, list(dict.fromkeys(list(getattr(person, field) or []) + values)))
+                db.commit()
         elif update_type == "strategic_issue":
-            _upsert_strategic_issue(db, update.get("title") or "Improve PM quality", company=detected_company or "PEC", owner=detected_name or "CEO")
-        elif update_type == "company" and detected_company:
-            _upsert_company(db, detected_company)
-        elif update_type == "decision" and detected_name:
-            _upsert_decision(db, update.get("title") or f"{detected_name} promotion and pay increase", company=detected_company or "PEC", context=text, final_decision="Compensation adjustment and expanded responsibilities.", reasoning="Recognize growth and align incentives with expanded ownership.")
+            title = update.get("title") or ("Improve PM quality" if "pm quality" in lowered else "")
+            if title:
+                issue = _upsert_strategic_issue(db, title, company=update_company, owner=update.get("owner") or update_name)
+                issue.current_thinking = update.get("current_thinking") or issue.current_thinking
+                issue.status = update.get("status") or issue.status
+                db.commit()
+        elif update_type == "company" and update_name:
+            company = _upsert_company(db, update_name)
+            if update.get("description"):
+                company.description = update["description"]
+                db.commit()
+        elif update_type == "decision" and update.get("title"):
+            decision = _upsert_decision(
+                db,
+                update["title"],
+                company=update_company,
+                context=update.get("context") or text,
+                final_decision=update.get("final_decision") or update.get("details") or "Decision captured.",
+                reasoning=update.get("reasoning") or "",
+            )
+            for field in ("date", "options_considered", "expected_outcome", "review_date"):
+                value = update.get(field)
+                if value not in (None, "", []):
+                    setattr(decision, field, value)
+            db.commit()
+        else:
+            _apply_generic_update(db, update)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # The MVP uses no cookies or browser credentials. This keeps cross-origin
+    # static-site requests valid without the unsafe wildcard+credentials pair.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def startup_event():
-    db = next(get_db())
-    seed_data(db)
 
 
 @app.get("/health")
@@ -235,38 +330,49 @@ def health():
 
 @app.get("/briefing")
 def briefing(db: Session = Depends(get_db)):
-    issues = db.query(StrategicIssue).all()
+    today = date.today().isoformat()
+    issues = db.query(StrategicIssue).filter(StrategicIssue.status == "active").all()
     people = db.query(Person).all()
     decisions = db.query(Decision).all()
+    meetings = db.query(Meeting).filter(Meeting.date == today).all()
+    projects = db.query(Project).all()
+    risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
+    waiting_on = [action for meeting in db.query(Meeting).all() for action in (meeting.action_items or [])]
+    focus = issues[0].title if issues else (decisions[0].title if decisions else "Capture the most important current context")
     return {
-        "top_priorities": [issue.title for issue in issues[:3]] or ["Increase PEC sales", "Improve PM quality", "Reduce RYSE overtime"],
-        "strategic_issues": [issue.title for issue in issues[:3]] or ["Buyer diligence", "Admissions improvement"],
-        "meetings_today": [],
-        "open_decisions": [decision.title for decision in decisions[:3]] or ["Julio pay review", "EverPole distributor strategy"],
-        "people_needing_attention": [person.name for person in people[:3]] or ["Julio", "RYSE admissions lead"],
-        "waiting_on_items": ["Sales pipeline review"],
-        "risks": ["Staffing capacity"],
-        "recommended_focus": "Focus on PM quality and sales conversion."
+        "top_priorities": [issue.title for issue in issues[:3]],
+        "strategic_issues": [issue.title for issue in issues[:3]],
+        "meetings_today": [meeting.title for meeting in meetings],
+        "open_decisions": [decision.title for decision in decisions if not decision.review_date or decision.review_date >= today][:3],
+        "people_needing_attention": [person.name for person in people if person.concerns][:3],
+        "waiting_on_items": waiting_on[:5],
+        "risks": risks[:5],
+        "recommended_focus": f"Focus first on {focus}."
     }
 
 
 @app.post("/capture")
 def capture(payload: CaptureRequest, db: Session = Depends(get_db)):
-    suggested_updates = _classify_capture_text(payload.text)
+    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
     if payload.confirm:
         _apply_approved_updates(db, payload.text, suggested_updates)
     return {
         "message": "Capture accepted",
         "suggested_updates": suggested_updates,
+        "follow_ups": follow_ups,
+        "classification_source": classification_source,
         "confirm": payload.confirm,
     }
 
 
 @app.post("/capture/classify")
-def classify_capture(payload: CaptureClassificationRequest):
+def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db)):
+    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
     return {
         "message": "Classification complete",
-        "suggested_updates": _classify_capture_text(payload.text),
+        "suggested_updates": suggested_updates,
+        "follow_ups": follow_ups,
+        "classification_source": classification_source,
         "confirm": payload.confirm,
     }
 
@@ -276,7 +382,7 @@ def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(g
     _apply_approved_updates(db, payload.text, payload.approved_updates)
     return {
         "message": "Approved updates saved",
-        "approved_updates": payload.approved_updates,
+        "approved_updates": [update.model_dump() for update in payload.approved_updates],
     }
 
 
@@ -290,10 +396,21 @@ def list_objects(object_type: str, db: Session = Depends(get_db)):
 @app.post("/objects/{object_type}")
 def create_object(object_type: str, payload: CreateObjectRequest, db: Session = Depends(get_db)):
     model = _model_for_object_type(object_type)
-    instance = model(**payload.attributes)
-    db.add(instance)
-    db.commit()
-    db.refresh(instance)
+    valid_fields = {column.name for column in model.__table__.columns} - {"id"}
+    unknown_fields = sorted(set(payload.attributes) - valid_fields)
+    if unknown_fields:
+        raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(unknown_fields)}")
+    try:
+        instance = model(**payload.attributes)
+        db.add(instance)
+        db.commit()
+        db.refresh(instance)
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An object with these unique values already exists") from error
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Object could not be created") from error
     return {"message": f"{object_type} created", "object": _serialize_model(instance)}
 
 
@@ -303,6 +420,11 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db)):
     issues = db.query(StrategicIssue).all()
     decisions = db.query(Decision).all()
     people = db.query(Person).all()
+    meetings = db.query(Meeting).order_by(Meeting.date.desc()).limit(5).all()
+    metrics = db.query(Metric).all()
+    projects = db.query(Project).all()
+    action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
+    risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     agenda = [
         f"Review current context for {meeting_title}",
         f"Discuss open decisions: {', '.join(decision.title for decision in decisions[:2]) if decisions else 'No open decisions'}",
@@ -315,6 +437,10 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db)):
         "related_people": [person.name for person in people[:3]],
         "related_strategic_issues": [issue.title for issue in issues[:3]],
         "open_decisions": [decision.title for decision in decisions[:3]],
+        "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
+        "action_items": action_items[:5],
+        "metrics": [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]],
+        "risks": risks[:5],
     }
 
 

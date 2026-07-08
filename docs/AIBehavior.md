@@ -7,3 +7,10 @@ The system should:
 3. Propose structured updates for confirmation
 4. Save approved changes and link related objects
 5. Generate briefing and prep outputs on demand
+
+## Runtime behavior
+
+- Capture uses OpenAI Structured Outputs when `OPENAI_API_KEY` is configured.
+- The model receives a compact list of known companies, people, and strategic issues to improve entity linking.
+- Suggested updates and follow-up questions are disposable until the user explicitly confirms updates.
+- Without an API key or during a provider outage, the app returns a visibly labeled, limited local preview instead of silently pretending that rules-based extraction is AI.
