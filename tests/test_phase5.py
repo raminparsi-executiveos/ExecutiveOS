@@ -117,6 +117,19 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
     assert unavailable.json()['follow_ups']
 
 
+def test_text_only_capture_accepts_explicit_empty_image_field(monkeypatch):
+    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory: CaptureAnalysis(
+        suggested_updates=[SuggestedUpdate(type='person', name='Brandon', company='RYSE Wellness')]
+    ))
+    response = client.post('/capture/classify', json={
+        'text': 'RYSE - Brandon is going to another company. Should we look to per diem workers?',
+        'image_data': '',
+        'confirm': True,
+    })
+    assert response.status_code == 200
+    assert response.json()['suggested_updates'][0]['name'] == 'Brandon'
+
+
 def test_saved_memory_feeds_briefing_prep_and_search():
     update = SuggestedUpdate(
         type='project',

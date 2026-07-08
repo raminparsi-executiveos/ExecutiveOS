@@ -69,6 +69,12 @@ async function safeJsonFetch(url, options) {
     try {
       const body = JSON.parse(bodyText);
       detail = typeof body.detail === 'string' ? body.detail : '';
+      if (!detail && Array.isArray(body.detail)) {
+        detail = body.detail
+          .map((issue) => typeof issue?.msg === 'string' ? issue.msg.replace(/^Value error,\s*/i, '') : '')
+          .filter(Boolean)
+          .join('. ');
+      }
     } catch {
       // Do not expose an arbitrary upstream response body in the UI.
     }

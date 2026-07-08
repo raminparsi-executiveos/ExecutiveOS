@@ -29,7 +29,11 @@ class MeetingPrepRequest(BaseModel):
 
 class CaptureClassificationRequest(BaseModel):
     text: str = Field(default="", max_length=20_000)
-    image_data: str = Field(default="", max_length=7_000_000, pattern=r"^data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
+    image_data: str = Field(
+        default="",
+        max_length=7_000_000,
+        pattern=r"^(?:|data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+)$",
+    )
     confirm: bool = False
 
     @model_validator(mode="after")

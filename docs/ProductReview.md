@@ -44,6 +44,8 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Validate screenshot type and size while avoiding persistent image storage.
 - [x] Clearly report when screenshot analysis is unavailable without an AI connection.
 - [x] Keep screenshots optional and enable text-only Capture immediately as the user types.
+- [x] Accept the browser's explicit empty image field for text-only Capture.
+- [x] Show useful API validation messages instead of a generic 422 error.
 
 ## Sample acceptance scenarios
 
