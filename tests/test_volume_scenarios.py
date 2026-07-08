@@ -68,3 +68,43 @@ def test_plural_quantity_and_aggregate_questions():
     questions = client.post('/search', json={'query': 'What are all open questions?'}).json()
     assert 'Should PEC accelerate volume hiring?' in questions['answer']
     assert 'Can RYSE add volume weekend intake?' in questions['answer']
+
+
+def test_employment_transition_context_reaches_every_generated_output():
+    transition = (
+        'Yeison is transitioning to Northwind as his primary company on August 1. '
+        'He will remain part-time at PEC for 15 hours per week through September, '
+        'finishing the Meridian handoff and supporting Julio on client escalations.'
+    )
+    saved = client.post('/capture/confirm', json={
+        'text': transition,
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'person',
+            'name': 'Yeison',
+            'company': 'Northwind',
+            'role': 'Part-time PEC transition support',
+            'responsibilities': ['Finish the Meridian handoff', 'Support Julio on client escalations'],
+            'current_priorities': ['Transition to Northwind', 'Complete PEC handoff'],
+            'details': transition,
+        }],
+    })
+    assert saved.status_code == 200
+
+    yeison = next(
+        person for person in client.get('/objects/people').json()['items']
+        if person['name'] == 'Yeison'
+    )
+    assert transition in yeison['performance_notes']
+    assert yeison['company'] == 'Northwind'
+
+    search = client.post('/search', json={'query': 'What is Yeison doing part-time at PEC?'}).json()
+    assert '15 hours per week' in search['answer']
+    assert 'Meridian handoff' in search['answer']
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC Yeison transition review'}).json()
+    assert 'Yeison' in prep['related_people']
+    assert any('15 hours per week' in context for context in prep['recent_capture_context'])
+
+    morning = client.get('/briefing').json()
+    assert any('Yeison is transitioning' in update for update in morning['recent_updates'])

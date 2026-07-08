@@ -116,7 +116,8 @@ def test_meeting_prep_does_not_include_unrelated_company_memory():
     assert 'Improve PM quality' not in prep['related_strategic_issues']
 
     pec = client.post('/meeting-prep', json={'meeting': 'PEC leadership review'}).json()
-    assert pec['open_decisions'] == ['Julio promotion and pay increase']
+    assert 'Julio promotion and pay increase' in pec['open_decisions']
+    assert 'Add weekend intake coverage' not in pec['open_decisions']
     assert 'Increase sales' not in pec['related_strategic_issues']
 
 

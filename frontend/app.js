@@ -440,6 +440,7 @@ function renderPanel() {
             <article><h4>Projects</h4>${renderList(meetingPrep.related_projects)}</article>
             <article><h4>Open decisions</h4>${renderList(meetingPrep.open_decisions)}</article>
             <article><h4>Recent context</h4>${renderList(meetingPrep.recent_meeting_context)}</article>
+            <article><h4>Recent captured updates</h4>${renderList(meetingPrep.recent_capture_context)}</article>
             <article><h4>Action items</h4>${renderList(meetingPrep.action_items)}</article>
             <article><h4>Metrics</h4>${renderList(meetingPrep.metrics)}</article>
             <article><h4>Risks</h4>${renderList(meetingPrep.risks)}</article>

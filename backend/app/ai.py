@@ -65,6 +65,11 @@ assign Y. A person update that changes employment must include the corrected com
 Treat similar names as distinct identities unless the user explicitly says they are
 aliases. Never expand a short name (for example, Juli) into another name (Juliana or
 Julio). When the user distinguishes two people, create/update the exact stated name.
+For employment transitions, preserve the former company, new company, timing, and any
+continuing part-time or advisory relationship in the person's performance_notes. Set
+company to the person's new primary company only when the capture makes that clear.
+Use details as a concise human-readable summary, but also populate the durable typed
+fields because details may be used only as supporting context.
 """
 
 

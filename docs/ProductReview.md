@@ -31,6 +31,11 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Aggregate multi-record risks, decisions, action items, metrics, and open questions into useful answers.
 - [x] Support honest `today` and `overdue` queries without returning unrelated memory.
 - [x] Match conservative singular/plural variants such as `distributors` and `Distributor count`.
+- [x] Preserve approved person-update details as durable performance context.
+- [x] Keep employment-transition timing, former/new companies, and continuing part-time relationships.
+- [x] Surface recent confirmed captures in morning briefing, meeting prep, and search.
+- [x] Include people mentioned in matched capture context even when their primary company has changed.
+- [x] Keep an approved new primary company authoritative when transition text also mentions PEC.
 
 ## Sample acceptance scenarios
 

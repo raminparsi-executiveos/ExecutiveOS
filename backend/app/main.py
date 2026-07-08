@@ -104,7 +104,7 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
     stop_words = {
         "a", "an", "and", "are", "company", "did", "do", "does", "for", "from",
         "in", "is", "me", "meeting", "metric", "my", "of", "on", "person", "project",
-        "role", "s", "the", "to", "we", "what", "why", "with",
+        "completely", "new", "role", "s", "the", "to", "topic", "we", "what", "why", "with",
     }
     tokens = set(re.findall(r"[a-z0-9]+", normalized_query)) - stop_words
     haystack_tokens = set(re.findall(r"[a-z0-9]+", haystack))
@@ -196,7 +196,13 @@ def _rank_for_context(
 def _result_summary(item: Any) -> str:
     if isinstance(item, Person):
         role = item.role or "Person"
-        return f"{role} at {item.company}" if item.company else role
+        summary = f"{role} at {item.company}" if item.company else role
+        if item.performance_notes:
+            summary += f" — {item.performance_notes[-1]}"
+        return summary
+    if isinstance(item, CaptureRecord):
+        text_value = " ".join(item.raw_text.split())
+        return text_value if len(text_value) <= 500 else f"{text_value[:497]}..."
     if isinstance(item, StrategicIssue):
         details = [item.status.capitalize() if item.status else "Strategic issue"]
         if item.owner:
@@ -236,6 +242,9 @@ def _company_in_query(query: str) -> str:
 def _belongs_to_company(item: Any, company: str) -> bool:
     if isinstance(item, Company):
         return item.name.lower() == company.lower()
+    if isinstance(item, CaptureRecord):
+        aliases = [alias for alias, canonical in COMPANY_ALIASES.items() if canonical == company]
+        return any(_company_mentions(item.raw_text, alias) for alias in aliases)
     return str(getattr(item, "company", "")).lower() == company.lower()
 
 
@@ -282,6 +291,8 @@ def _answer_for_result(item: Any, query: str) -> str:
             return "; ".join(item.action_items)
         if tokens & {"question", "questions"} and item.open_questions:
             return "; ".join(item.open_questions)
+    if isinstance(item, CaptureRecord):
+        return item.raw_text
     return _result_summary(item)
 
 
@@ -328,6 +339,20 @@ def _merge_memory_labels(primary: list[str], supplemental: list[str], company: s
         merged.append(label)
         token_sets.append(tokens)
     return merged
+
+
+def _unique_captures(captures: list[CaptureRecord], limit: int = 5) -> list[CaptureRecord]:
+    unique: list[CaptureRecord] = []
+    seen: set[str] = set()
+    for capture in captures:
+        normalized = " ".join(capture.raw_text.lower().split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(capture)
+        if len(unique) == limit:
+            break
+    return unique
 
 
 def _company_mentions(text: str, alias: str) -> list[re.Match[str]]:
@@ -593,7 +618,10 @@ def _apply_approved_updates(
         proposed_company = _normalize_company(update.get("company") or "")
         if proposed_company and _company_is_explicitly_negated(text, proposed_company):
             proposed_company = ""
-        update_company = explicit_company or proposed_company
+        # The reviewed structured value is authoritative. Text detection is only
+        # a fallback, especially for transitions that legitimately mention both
+        # the former and new company in one capture.
+        update_company = proposed_company or explicit_company
         if update_type == "person" and update_name:
             _upsert_person(
                 db,
@@ -610,12 +638,19 @@ def _apply_approved_updates(
                     values = update.get(field) or []
                     if values:
                         setattr(person, field, list(dict.fromkeys(list(getattr(person, field) or []) + values)))
+                details = (update.get("details") or "").strip()
+                if details and classification_source != "local_fallback":
+                    person.performance_notes = list(dict.fromkeys(
+                        list(person.performance_notes or []) + [details]
+                    ))
                 db.flush()
         elif update_type == "strategic_issue":
             title = update.get("title") or ("Improve PM quality" if "pm quality" in lowered else "")
             if title:
                 issue = _upsert_strategic_issue(db, title, company=update_company, owner=update.get("owner") or update_name)
-                issue.current_thinking = update.get("current_thinking") or issue.current_thinking
+                issue.current_thinking = (
+                    update.get("current_thinking") or update.get("details") or issue.current_thinking
+                )
                 issue.status = update.get("status") or issue.status
                 db.flush()
         elif update_type == "company" and update_name:
@@ -638,6 +673,16 @@ def _apply_approved_updates(
                     setattr(decision, field, value)
             db.flush()
         else:
+            if update.get("details"):
+                detail_field = {
+                    "project": "objective",
+                    "meeting": "summary",
+                    "sop": "current_process",
+                    "document": "summary",
+                    "metric": "notes",
+                }.get(update_type)
+                if detail_field and not update.get(detail_field):
+                    update = {**update, detail_field: update["details"]}
             _apply_generic_update(db, update)
 
     db.add(CaptureRecord(
@@ -695,16 +740,24 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     projects = db.query(Project).order_by(Project.id.desc()).all()
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     waiting_on = [action for meeting in db.query(Meeting).all() for action in (meeting.action_items or [])]
-    priorities = [project.title for project in projects if project.status == "active"] + [issue.title for issue in issues]
+    recent_captures = _unique_captures(
+        db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
+    )
+    priorities = list(dict.fromkeys(
+        [project.title for project in projects if project.status == "active"] + [issue.title for issue in issues]
+    ))
     focus = priorities[0] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
     return {
         "top_priorities": priorities[:3],
         "strategic_issues": [issue.title for issue in issues[:3]],
         "meetings_today": [meeting.title for meeting in meetings],
-        "open_decisions": [decision.title for decision in decisions if not decision.review_date or decision.review_date >= today][:3],
+        "open_decisions": list(dict.fromkeys(
+            decision.title for decision in decisions if not decision.review_date or decision.review_date >= today
+        ))[:3],
         "people_needing_attention": [person.name for person in people if person.concerns][:3],
         "waiting_on_items": waiting_on[:5],
         "risks": risks[:5],
+        "recent_updates": [_result_summary(capture) for capture in recent_captures],
         "recommended_focus": f"Focus first on {focus}."
     }
 
@@ -822,16 +875,29 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], meeting_title)[:5]
     metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], meeting_title)
     projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], meeting_title)
+    capture_candidates = scoped_items(CaptureRecord)
+    minimum_capture_score = 1 if company_name else 6
+    captures = _unique_captures([
+        capture for capture in _rank_for_context(capture_candidates, ["raw_text"], meeting_title)
+        if _match_score(capture, ["raw_text"], meeting_title) >= minimum_capture_score
+    ])
+    capture_people = [
+        person.name
+        for person in db.query(Person).all()
+        if any(re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE) for capture in captures)
+    ]
     action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     supplemental_people = list(company.people or [] if company else [])
     supplemental_issues = list(company.strategic_issues or [] if company else [])
     supplemental_projects = list(company.projects or [] if company else [])
     supplemental_decisions = list(company.decisions or [] if company else [])
-    related_people = _merge_memory_labels([person.name for person in people[:3]], supplemental_people, company_name)[:5]
-    related_issues = _merge_memory_labels([issue.title for issue in issues[:3]], supplemental_issues, company_name)[:5]
-    related_projects = _merge_memory_labels([project.title for project in projects[:3]], supplemental_projects, company_name)[:5]
-    related_decisions = _merge_memory_labels([decision.title for decision in decisions[:3]], supplemental_decisions, company_name)[:5]
+    related_people = _merge_memory_labels(
+        [person.name for person in people] + capture_people, supplemental_people, company_name
+    )[:5]
+    related_issues = _merge_memory_labels([issue.title for issue in issues], supplemental_issues, company_name)[:5]
+    related_projects = _merge_memory_labels([project.title for project in projects], supplemental_projects, company_name)[:5]
+    related_decisions = _merge_memory_labels([decision.title for decision in decisions], supplemental_decisions, company_name)[:5]
     metric_summaries = [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]]
     metric_summaries = list(dict.fromkeys(metric_summaries + list(company.kpis or [] if company else [])))[:5]
     agenda = [
@@ -843,13 +909,14 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     ]
     return {
         "meeting": meeting_title,
-        "context_found": bool(company or issues or decisions or people or meetings or metrics or projects),
+        "context_found": bool(company or issues or decisions or people or meetings or metrics or projects or captures),
         "agenda": agenda,
         "related_people": related_people,
         "related_strategic_issues": related_issues,
         "related_projects": related_projects,
         "open_decisions": related_decisions,
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
+        "recent_capture_context": [_result_summary(capture) for capture in captures],
         "action_items": action_items[:5],
         "metrics": metric_summaries,
         "risks": risks[:5],
@@ -861,6 +928,14 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
     ranked_results = []
     query_tokens = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
     target_company = _company_in_query(payload.query)
+    mentioned_people = [
+        person for person in db.query(Person).all()
+        if re.search(rf"\b{re.escape(person.name)}\b", payload.query, flags=re.IGNORECASE)
+    ]
+    transition_people = [
+        person.name for person in mentioned_people
+        if target_company and person.company.lower() != target_company.lower()
+    ]
     risk_intent = bool(query_tokens & {"risk", "risks"})
     action_intent = bool(query_tokens & {"action", "actions"})
     question_intent = bool(query_tokens & {"question", "questions"})
@@ -906,13 +981,39 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                     "summary": _result_summary(item),
                 }))
 
+    for capture in db.query(CaptureRecord).all():
+        if target_company and not _belongs_to_company(capture, target_company):
+            continue
+        score = _match_score(capture, ["raw_text"], payload.query)
+        if score:
+            capture_score = min(score, 8)
+            if any(re.search(rf"\b{re.escape(name)}\b", capture.raw_text, flags=re.IGNORECASE) for name in transition_people):
+                capture_score += 40
+            ranked_results.append((capture_score, capture.id or 0, capture, {
+                "type": "capture",
+                "title": f"Captured update from {capture.created_at.date().isoformat()}",
+                "summary": _result_summary(capture),
+            }))
+
     ranked_results.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
     if not ranked_results:
         return {"query": payload.query, "answer": "No matching executive memory found.", "results": []}
     # Keep close supporting matches while dropping weak records that happen to
     # share one generic word with the question.
     cutoff = max(1, ranked_results[0][0] - 6)
-    included = [entry for entry in ranked_results if entry[0] >= cutoff][:10]
+    included = []
+    seen_results = set()
+    for entry in ranked_results:
+        if entry[0] < cutoff:
+            continue
+        result = entry[3]
+        identity = (result["type"], result["title"], result["summary"])
+        if identity in seen_results:
+            continue
+        seen_results.add(identity)
+        included.append(entry)
+        if len(included) == 10:
+            break
     results = [entry[3] for entry in included]
     answer = _answer_for_ranked_items([entry[2] for entry in included], payload.query)
     return {"query": payload.query, "answer": answer, "results": results}
