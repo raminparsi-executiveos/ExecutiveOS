@@ -27,4 +27,4 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 
 COPY backend /app
 EXPOSE 8000
-CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:${PORT:-8000}"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
