@@ -9,6 +9,15 @@ const app = document.getElementById('app');
 const configuredApiBase = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').trim();
 const API_BASE = (/^https?:\/\//i.test(configuredApiBase) ? configuredApiBase : `https://${configuredApiBase}`).replace(/\/$/, '');
 const apiUrl = (path) => `${API_BASE}${path}`;
+const TOKEN_KEY = 'executiveos_session';
+
+function storedToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -34,15 +43,22 @@ let meetingPrep = null;
 let searchResults = null;
 let captureText = 'Julio is now responsible for PM quality and high-priority clients. His pay is increasing from $14.42/hr to $17.50/hr.';
 let searchQuery = 'Why did we promote Julio?';
+let meetingQuery = 'RYSE leadership meeting';
 let captureResult = null;
 let classificationResult = null;
 let selectedUpdateIndices = [];
 let apiError = null;
 let briefingLoading = false;
 let submitting = false;
+let authToken = storedToken();
+let authState = 'loading';
+let authMessage = '';
+let authIsRequired = false;
 
 async function safeJsonFetch(url, options) {
-  const response = await fetch(url, options);
+  const headers = new Headers(options?.headers || {});
+  if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
+  const response = await fetch(url, { ...options, headers });
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     const bodyText = await response.text();
@@ -53,6 +69,9 @@ async function safeJsonFetch(url, options) {
     } catch {
       // Do not expose an arbitrary upstream response body in the UI.
     }
+    if (response.status === 401) {
+      logout('Your session expired. Please sign in again.');
+    }
     throw new Error(detail || `Request failed (${response.status})`);
   }
   if (!contentType.includes('application/json')) {
@@ -62,21 +81,29 @@ async function safeJsonFetch(url, options) {
 }
 
 function render() {
+  if (authState !== 'authenticated') {
+    renderAuthentication();
+    return;
+  }
+
   app.innerHTML = `
-    <h1>ExecutiveOS</h1>
-    <p>AI-first executive memory and decision platform.</p>
+    <header class="app-header"><div><h1>ExecutiveOS</h1><p>AI-first executive memory and decision platform.</p></div>${authIsRequired ? '<button id="logout" class="secondary">Sign out</button>' : ''}</header>
     ${apiError ? `<div class="error" role="alert"><strong>API error:</strong> ${escapeHtml(apiError)}</div>` : ''}
-    <nav>
-      ${sections.map((section) => `<button class="${section.key === active ? 'active' : ''}" data-key="${section.key}">${section.label}</button>`).join('')}
+    <nav aria-label="ExecutiveOS sections">
+      ${sections.map((section) => `<button type="button" class="${section.key === active ? 'active' : ''}" data-key="${section.key}" aria-pressed="${section.key === active}">${section.label}</button>`).join('')}
     </nav>
     <section class="panel">
       ${renderPanel()}
     </section>
   `;
 
+  app.querySelector('#logout')?.addEventListener('click', () => logout());
+
   app.querySelectorAll('button[data-key]').forEach((button) => {
     button.addEventListener('click', () => {
-      active = button.getAttribute('data-key');
+      const nextSection = button.getAttribute('data-key');
+      if (nextSection === 'briefing' && nextSection !== active) briefing = null;
+      active = nextSection;
       render();
     });
   });
@@ -127,8 +154,14 @@ function render() {
             body: JSON.stringify({
               text: captureText,
               approved_updates: approvedUpdates,
+              classification_source: classificationResult?.classification_source || 'unknown',
             }),
           });
+          // Generated outputs are disposable views over memory. Invalidate them
+          // whenever the underlying memory changes.
+          briefing = null;
+          meetingPrep = null;
+          searchResults = null;
           apiError = null;
         } catch (error) {
           setApiError(error.message);
@@ -154,11 +187,18 @@ function render() {
   }
 
   if (active === 'prep') {
+    const input = app.querySelector('#prep-input');
     const button = app.querySelector('#prep-submit');
+    if (input) {
+      input.value = meetingQuery;
+      input.addEventListener('input', (event) => {
+        meetingQuery = event.target.value;
+      });
+    }
     if (button) {
       button.addEventListener('click', async () => {
         if (submitting) return;
-        const meeting = app.querySelector('#prep-input').value.trim() || 'Executive meeting';
+        const meeting = meetingQuery.trim() || 'Executive meeting';
         submitting = true;
         render();
         try {
@@ -210,6 +250,84 @@ function render() {
   }
 }
 
+function renderAuthentication() {
+  if (authState === 'loading') {
+    app.innerHTML = '<section class="auth-card"><h1>ExecutiveOS</h1><p>Loading securely…</p></section>';
+    return;
+  }
+  if (authState === 'configuration_error') {
+    app.innerHTML = '<section class="auth-card"><h1>ExecutiveOS</h1><div class="error" role="alert">Login is not configured. Set EXECUTIVEOS_PASSWORD and SESSION_SECRET on the backend service.</div></section>';
+    return;
+  }
+  app.innerHTML = `
+    <section class="auth-card">
+      <h1>ExecutiveOS</h1>
+      <p>Sign in to your executive memory.</p>
+      ${authMessage ? `<div class="error" role="alert">${escapeHtml(authMessage)}</div>` : ''}
+      <form id="login-form">
+        <label>Username<input id="username" name="username" autocomplete="username" required /></label>
+        <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Signing in…' : 'Sign in'}</button>
+      </form>
+    </section>`;
+  app.querySelector('#login-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    submitting = true;
+    authMessage = '';
+    const form = new FormData(event.currentTarget);
+    const credentials = { username: form.get('username'), password: form.get('password') };
+    render();
+    try {
+      const result = await safeJsonFetch(apiUrl('/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials),
+      });
+      authToken = result.access_token;
+      sessionStorage.setItem(TOKEN_KEY, authToken);
+      authState = 'authenticated';
+      apiError = null;
+    } catch (error) {
+      authMessage = error.message;
+    } finally {
+      submitting = false;
+      render();
+    }
+  });
+}
+
+function logout(message = '') {
+  authToken = '';
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+  authState = 'unauthenticated';
+  authMessage = message;
+  briefing = null;
+  meetingPrep = null;
+  searchResults = null;
+  render();
+}
+
+async function initialize() {
+  try {
+    const status = await safeJsonFetch(apiUrl('/auth/status'));
+    authIsRequired = status.required;
+    if (status.required && !status.configured) {
+      authState = 'configuration_error';
+    } else {
+      authState = status.required && !authToken ? 'unauthenticated' : 'authenticated';
+    }
+  } catch (error) {
+    authState = 'unauthenticated';
+    authMessage = error.message;
+  }
+  render();
+}
+
 function setApiError(error) {
   apiError = error;
   render();
@@ -220,7 +338,8 @@ function renderPanel() {
     return `
       <h2>Capture</h2>
       <p>Enter natural language, review the suggested updates, and approve the ones that should be saved.</p>
-      <textarea rows="6"></textarea>
+      <label for="capture-input" class="sr-only">Executive update</label>
+      <textarea id="capture-input" rows="6"></textarea>
       <button id="capture-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Working…' : 'Classify and review updates'}</button>
       ${classificationResult ? `
         <div style="margin-top: 12px;">
@@ -239,7 +358,7 @@ function renderPanel() {
           <button id="capture-confirm" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Save approved updates'}</button>
         </div>
       ` : ''}
-      ${captureResult ? `<p class="success" role="status">Approved updates are now part of executive memory.</p>` : ''}
+      ${captureResult ? `<p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>` : ''}
     `;
   }
 
@@ -276,7 +395,8 @@ function renderPanel() {
     return `
       <h2>Meeting Prep</h2>
       <p>Generate a meeting agenda from recent summaries, open decisions, people, and strategic issues.</p>
-      <input id="prep-input" value="RYSE leadership meeting" />
+      <label for="prep-input" class="sr-only">Meeting name or context</label>
+      <input id="prep-input" />
       <button id="prep-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Preparing…' : 'Prepare meeting'}</button>
       ${meetingPrep ? `
         <div class="output">
@@ -285,6 +405,7 @@ function renderPanel() {
           <div class="briefing-grid">
             <article><h4>People</h4>${renderList(meetingPrep.related_people)}</article>
             <article><h4>Strategic issues</h4>${renderList(meetingPrep.related_strategic_issues)}</article>
+            <article><h4>Projects</h4>${renderList(meetingPrep.related_projects)}</article>
             <article><h4>Open decisions</h4>${renderList(meetingPrep.open_decisions)}</article>
             <article><h4>Recent context</h4>${renderList(meetingPrep.recent_meeting_context)}</article>
             <article><h4>Action items</h4>${renderList(meetingPrep.action_items)}</article>
@@ -297,6 +418,7 @@ function renderPanel() {
 
   return `
     <h2>Search / Ask</h2>
+    <label for="search-input" class="sr-only">Question about executive memory</label>
     <input id="search-input" placeholder="Why did we promote Julio?" />
     <button id="search-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Searching…' : 'Ask ExecutiveOS'}</button>
     ${searchResults ? `<div class="results">${searchResults.results.length ? searchResults.results.map((result) => `
@@ -305,4 +427,4 @@ function renderPanel() {
   `;
 }
 
-render();
+initialize();

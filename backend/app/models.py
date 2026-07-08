@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, JSON
+from datetime import datetime, timezone
+
+from sqlalchemy import Column, DateTime, Integer, String, Text, JSON
 
 from .database import Base
 
@@ -136,3 +138,13 @@ class Metric(Base):
     related_strategic_issue = Column(String, default="")
     trend = Column(String, default="stable")
     notes = Column(Text, default="")
+
+
+class CaptureRecord(Base):
+    __tablename__ = "capture_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    raw_text = Column(Text, nullable=False)
+    classification_source = Column(String, default="unknown")
+    saved_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

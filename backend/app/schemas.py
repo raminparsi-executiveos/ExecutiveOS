@@ -10,6 +10,11 @@ class CaptureRequest(BaseModel):
     confirm: bool = True
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=500)
+
+
 class CreateObjectRequest(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
@@ -30,3 +35,4 @@ class CaptureClassificationRequest(BaseModel):
 class CaptureConfirmationRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
     approved_updates: list[SuggestedUpdate] = Field(default_factory=list, max_length=50)
+    classification_source: str = Field(default="unknown", max_length=50)

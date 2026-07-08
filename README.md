@@ -26,6 +26,8 @@ The system stores executive memory as structured objects and generates outputs o
 
 Set `OPENAI_API_KEY` to enable AI classification. `OPENAI_MODEL` defaults to `gpt-5.4-mini`. Without a key, Capture uses a limited local preview classifier so development remains usable; production should configure the key.
 
+Authentication is optional for local development and required on Render. Configure `EXECUTIVEOS_USERNAME` (defaults to `admin`), an `EXECUTIVEOS_PASSWORD` of at least 12 characters, and a random `SESSION_SECRET` of at least 32 characters. The Blueprint generates the session secret, but existing Render services require adding the password manually in the service's Environment page.
+
 ## Render deployment
 
 The root `render.yaml` provisions the API, static frontend, and PostgreSQL database. The frontend API URL and backend database URL are wired automatically during Blueprint deployment. Data stored in local SQLite is for development only and is not migrated to Render.

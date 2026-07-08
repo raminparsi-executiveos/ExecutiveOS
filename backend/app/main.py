@@ -1,21 +1,27 @@
 import re
+import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .ai import SuggestedUpdate, analyze_capture
+from .auth import auth_configured, auth_required, authenticate, require_auth
 from .database import Base, engine, get_db
-from .models import Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue
+from .models import CaptureRecord, Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue
 from .schemas import (
     CaptureClassificationRequest,
     CaptureConfirmationRequest,
     CaptureRequest,
     CreateObjectRequest,
+    LoginRequest,
     MeetingPrepRequest,
     SearchRequest,
 )
@@ -33,6 +39,18 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="ExecutiveOS API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def add_operational_headers(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Process-Time-Ms"] = f"{(time.perf_counter() - started) * 1000:.1f}"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 OBJECT_MODEL_MAP = {
     "companies": Company,
@@ -70,14 +88,19 @@ def _stringify_value(value: Any) -> str:
 
 
 def _matches_query(record: Any, fields: list[str], query: str) -> bool:
+    return _match_score(record, fields, query) > 0
+
+
+def _match_score(record: Any, fields: list[str], query: str) -> int:
     haystack = " ".join(_stringify_value(getattr(record, field, "")) for field in fields).lower()
     if not query:
-        return False
+        return 0
     if query.lower() in haystack:
-        return True
+        return 20
 
     normalized_query = query.lower()
-    tokens = set(re.findall(r"[a-z0-9]+", normalized_query))
+    stop_words = {"a", "an", "and", "are", "for", "from", "in", "is", "me", "my", "of", "on", "the", "to", "what", "with"}
+    tokens = set(re.findall(r"[a-z0-9]+", normalized_query)) - stop_words
     synonyms = {
         "promote": ["promotion", "promoted", "raise", "increase", "pay"],
         "promoted": ["promotion", "promoted", "raise", "increase", "pay"],
@@ -85,13 +108,50 @@ def _matches_query(record: Any, fields: list[str], query: str) -> bool:
         "what": ["title", "summary", "context"],
         "happening": ["status", "active", "current", "issue", "project"],
     }
+    score = 0
     for token in tokens:
         if token in haystack:
-            return True
+            score += 3
+            continue
         for synonym in synonyms.get(token, []):
             if synonym in haystack:
-                return True
-    return False
+                score += 1
+                break
+    return score
+
+
+SEARCH_CONFIG = {
+    Company: ("name", ["name", "description", "strategic_issues", "projects", "people"]),
+    Person: ("name", ["name", "role", "company", "responsibilities", "concerns", "current_priorities", "performance_notes"]),
+    StrategicIssue: ("title", ["title", "company", "owner", "status", "current_thinking", "risks"]),
+    Project: ("title", ["title", "company", "objective", "status", "owner", "milestones", "risks", "next_steps"]),
+    Decision: ("title", ["title", "company", "context", "options_considered", "final_decision", "reasoning", "expected_outcome"]),
+    Meeting: ("title", ["title", "company", "attendees", "summary", "decisions_made", "action_items", "open_questions"]),
+    SOP: ("title", ["title", "company", "purpose", "owner", "current_process", "escalation_rules"]),
+    Document: ("title", ["title", "type", "source", "summary", "linked_objects"]),
+    Metric: ("title", ["title", "company", "value", "related_strategic_issue", "trend", "notes"]),
+}
+
+RESULT_TYPES = {
+    Company: "company", Person: "person", StrategicIssue: "strategic_issue",
+    Project: "project", Decision: "decision", Meeting: "meeting", SOP: "sop",
+    Document: "document", Metric: "metric",
+}
+
+
+def _rank_for_context(items: list[Any], fields: list[str], query: str) -> list[Any]:
+    scored = [(_match_score(item, fields, query), item.id or 0, item) for item in items]
+    relevant = [entry for entry in scored if entry[0] > 0]
+    pool = relevant or scored
+    return [entry[2] for entry in sorted(pool, key=lambda entry: (entry[0], entry[1]), reverse=True)]
+
+
+def _result_summary(item: Any) -> str:
+    for field in ("final_decision", "summary", "current_thinking", "objective", "description", "role", "purpose", "value", "notes"):
+        value = getattr(item, field, None)
+        if value:
+            return _stringify_value(value)
+    return f"{item.__class__.__name__.replace('StrategicIssue', 'Strategic issue')} memory"
 
 
 def _upsert_company(db: Session, name: str) -> Company:
@@ -99,7 +159,7 @@ def _upsert_company(db: Session, name: str) -> Company:
     if not company:
         company = Company(name=name)
     db.add(company)
-    db.commit()
+    db.flush()
     db.refresh(company)
     return company
 
@@ -118,7 +178,7 @@ def _upsert_person(db: Session, name: str, company: str = "", responsibilities: 
         if any("pm quality" in value.lower() for value in current_priorities):
             person.current_priorities = list(dict.fromkeys(existing + current_priorities + ["PM quality"]))
     db.add(person)
-    db.commit()
+    db.flush()
     db.refresh(person)
     return person
 
@@ -131,7 +191,7 @@ def _upsert_strategic_issue(db: Session, title: str, company: str = "", owner: s
     issue.owner = owner or issue.owner
     issue.status = "active"
     db.add(issue)
-    db.commit()
+    db.flush()
     db.refresh(issue)
     return issue
 
@@ -146,7 +206,7 @@ def _upsert_decision(db: Session, title: str, company: str, context: str, final_
     decision.reasoning = reasoning or decision.reasoning
     decision.date = decision.date or date.today().isoformat()
     db.add(decision)
-    db.commit()
+    db.flush()
     db.refresh(decision)
     return decision
 
@@ -242,11 +302,16 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
         if value not in (None, "", []):
             setattr(instance, field, value)
     db.add(instance)
-    db.commit()
+    db.flush()
     return True
 
 
-def _apply_approved_updates(db: Session, text: str, approved_updates: list[SuggestedUpdate | dict[str, Any]]) -> None:
+def _apply_approved_updates(
+    db: Session,
+    text: str,
+    approved_updates: list[SuggestedUpdate | dict[str, Any]],
+    classification_source: str = "unknown",
+) -> None:
     lowered = text.lower()
     detected_name = ""
     for candidate in ["Julio", "Mina"]:
@@ -281,19 +346,19 @@ def _apply_approved_updates(db: Session, text: str, approved_updates: list[Sugge
                     values = update.get(field) or []
                     if values:
                         setattr(person, field, list(dict.fromkeys(list(getattr(person, field) or []) + values)))
-                db.commit()
+                db.flush()
         elif update_type == "strategic_issue":
             title = update.get("title") or ("Improve PM quality" if "pm quality" in lowered else "")
             if title:
                 issue = _upsert_strategic_issue(db, title, company=update_company, owner=update.get("owner") or update_name)
                 issue.current_thinking = update.get("current_thinking") or issue.current_thinking
                 issue.status = update.get("status") or issue.status
-                db.commit()
+                db.flush()
         elif update_type == "company" and update_name:
             company = _upsert_company(db, update_name)
             if update.get("description"):
                 company.description = update["description"]
-                db.commit()
+                db.flush()
         elif update_type == "decision" and update.get("title"):
             decision = _upsert_decision(
                 db,
@@ -307,14 +372,22 @@ def _apply_approved_updates(db: Session, text: str, approved_updates: list[Sugge
                 value = update.get(field)
                 if value not in (None, "", []):
                     setattr(decision, field, value)
-            db.commit()
+            db.flush()
         else:
             _apply_generic_update(db, update)
 
+    db.add(CaptureRecord(
+        raw_text=text,
+        classification_source=classification_source,
+        saved_count=len(approved_updates),
+    ))
+    db.commit()
 
+
+configured_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=configured_origins,
     # The MVP uses no cookies or browser credentials. This keeps cross-origin
     # static-site requests valid without the unsafe wildcard+credentials pair.
     allow_credentials=False,
@@ -324,23 +397,39 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as error:
+        raise HTTPException(status_code=503, detail="Database unavailable") from error
+    return {"status": "ok", "database": "connected"}
+
+
+@app.get("/auth/status")
+def authentication_status():
+    return {"required": auth_required(), "configured": auth_configured()}
+
+
+@app.post("/auth/login")
+def login(payload: LoginRequest, request: Request):
+    token = authenticate(request, payload.username, payload.password)
+    return {"access_token": token, "token_type": "bearer", "expires_in": 43200}
 
 
 @app.get("/briefing")
-def briefing(db: Session = Depends(get_db)):
+def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     today = date.today().isoformat()
-    issues = db.query(StrategicIssue).filter(StrategicIssue.status == "active").all()
-    people = db.query(Person).all()
-    decisions = db.query(Decision).all()
-    meetings = db.query(Meeting).filter(Meeting.date == today).all()
-    projects = db.query(Project).all()
+    issues = db.query(StrategicIssue).filter(StrategicIssue.status == "active").order_by(StrategicIssue.id.desc()).all()
+    people = db.query(Person).order_by(Person.id.desc()).all()
+    decisions = db.query(Decision).order_by(Decision.id.desc()).all()
+    meetings = db.query(Meeting).filter(Meeting.date == today).order_by(Meeting.id.desc()).all()
+    projects = db.query(Project).order_by(Project.id.desc()).all()
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     waiting_on = [action for meeting in db.query(Meeting).all() for action in (meeting.action_items or [])]
-    focus = issues[0].title if issues else (decisions[0].title if decisions else "Capture the most important current context")
+    priorities = [project.title for project in projects if project.status == "active"] + [issue.title for issue in issues]
+    focus = priorities[0] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
     return {
-        "top_priorities": [issue.title for issue in issues[:3]],
+        "top_priorities": priorities[:3],
         "strategic_issues": [issue.title for issue in issues[:3]],
         "meetings_today": [meeting.title for meeting in meetings],
         "open_decisions": [decision.title for decision in decisions if not decision.review_date or decision.review_date >= today][:3],
@@ -352,10 +441,14 @@ def briefing(db: Session = Depends(get_db)):
 
 
 @app.post("/capture")
-def capture(payload: CaptureRequest, db: Session = Depends(get_db)):
+def capture(payload: CaptureRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
     if payload.confirm:
-        _apply_approved_updates(db, payload.text, suggested_updates)
+        try:
+            _apply_approved_updates(db, payload.text, suggested_updates, classification_source)
+        except SQLAlchemyError as error:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Capture could not be saved") from error
     return {
         "message": "Capture accepted",
         "suggested_updates": suggested_updates,
@@ -366,7 +459,7 @@ def capture(payload: CaptureRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/capture/classify")
-def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db)):
+def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
     return {
         "message": "Classification complete",
@@ -378,23 +471,36 @@ def classify_capture(payload: CaptureClassificationRequest, db: Session = Depend
 
 
 @app.post("/capture/confirm")
-def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(get_db)):
-    _apply_approved_updates(db, payload.text, payload.approved_updates)
+def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    try:
+        _apply_approved_updates(db, payload.text, payload.approved_updates, payload.classification_source)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Capture could not be saved") from error
     return {
         "message": "Approved updates saved",
+        "saved_count": len(payload.approved_updates),
         "approved_updates": [update.model_dump() for update in payload.approved_updates],
     }
 
 
 @app.get("/objects/{object_type}")
-def list_objects(object_type: str, db: Session = Depends(get_db)):
+def list_objects(
+    object_type: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
     model = _model_for_object_type(object_type)
-    items = db.query(model).all()
-    return {"items": [_serialize_model(item) for item in items]}
+    query = db.query(model)
+    total = query.count()
+    items = query.order_by(model.id.desc()).offset(offset).limit(limit).all()
+    return {"items": [_serialize_model(item) for item in items], "total": total, "limit": limit, "offset": offset}
 
 
 @app.post("/objects/{object_type}")
-def create_object(object_type: str, payload: CreateObjectRequest, db: Session = Depends(get_db)):
+def create_object(object_type: str, payload: CreateObjectRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     model = _model_for_object_type(object_type)
     valid_fields = {column.name for column in model.__table__.columns} - {"id"}
     unknown_fields = sorted(set(payload.attributes) - valid_fields)
@@ -414,21 +520,39 @@ def create_object(object_type: str, payload: CreateObjectRequest, db: Session = 
     return {"message": f"{object_type} created", "object": _serialize_model(instance)}
 
 
+@app.get("/captures")
+def capture_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    query = db.query(CaptureRecord)
+    records = query.order_by(CaptureRecord.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "items": [_serialize_model(record) for record in records],
+        "total": query.count(),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @app.post("/meeting-prep")
-def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db)):
+def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     meeting_title = payload.meeting or "Executive meeting"
-    issues = db.query(StrategicIssue).all()
-    decisions = db.query(Decision).all()
-    people = db.query(Person).all()
-    meetings = db.query(Meeting).order_by(Meeting.date.desc()).limit(5).all()
-    metrics = db.query(Metric).all()
-    projects = db.query(Project).all()
+    issues = _rank_for_context(db.query(StrategicIssue).all(), SEARCH_CONFIG[StrategicIssue][1], meeting_title)
+    decisions = _rank_for_context(db.query(Decision).all(), SEARCH_CONFIG[Decision][1], meeting_title)
+    people = _rank_for_context(db.query(Person).all(), SEARCH_CONFIG[Person][1], meeting_title)
+    meetings = _rank_for_context(db.query(Meeting).all(), SEARCH_CONFIG[Meeting][1], meeting_title)[:5]
+    metrics = _rank_for_context(db.query(Metric).all(), SEARCH_CONFIG[Metric][1], meeting_title)
+    projects = _rank_for_context(db.query(Project).all(), SEARCH_CONFIG[Project][1], meeting_title)
     action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     agenda = [
         f"Review current context for {meeting_title}",
         f"Discuss open decisions: {', '.join(decision.title for decision in decisions[:2]) if decisions else 'No open decisions'}",
         f"Validate strategic issues: {', '.join(issue.title for issue in issues[:2]) if issues else 'No active strategic issues'}",
+        f"Review active projects: {', '.join(project.title for project in projects[:2]) if projects else 'No active projects'}",
         "Confirm risks, action items, and follow-up owners",
     ]
     return {
@@ -436,6 +560,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db)):
         "agenda": agenda,
         "related_people": [person.name for person in people[:3]],
         "related_strategic_issues": [issue.title for issue in issues[:3]],
+        "related_projects": [project.title for project in projects[:3]],
         "open_decisions": [decision.title for decision in decisions[:3]],
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
         "action_items": action_items[:5],
@@ -445,21 +570,17 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/search")
-def search(payload: SearchRequest, db: Session = Depends(get_db)):
-    query = payload.query.lower()
-    results = []
+def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    ranked_results = []
+    for model, (title_field, fields) in SEARCH_CONFIG.items():
+        for item in db.query(model).all():
+            score = _match_score(item, fields, payload.query)
+            if score:
+                ranked_results.append((score, item.id or 0, {
+                    "type": RESULT_TYPES[model],
+                    "title": getattr(item, title_field),
+                    "summary": _result_summary(item),
+                }))
 
-    for decision in db.query(Decision).all():
-        if _matches_query(decision, ["title", "context", "final_decision"], query):
-            results.append({"type": "decision", "title": decision.title, "summary": decision.final_decision or decision.context})
-
-    for issue in db.query(StrategicIssue).all():
-        if _matches_query(issue, ["title", "current_thinking", "owner"], query):
-            results.append({"type": "strategic_issue", "title": issue.title, "summary": issue.current_thinking or "Active strategic issue"})
-
-    if not results:
-        for person in db.query(Person).all():
-            if _matches_query(person, ["name", "role", "company", "responsibilities", "current_priorities"], query):
-                results.append({"type": "person", "title": person.name, "summary": person.role or "Executive context"})
-
-    return {"query": payload.query, "results": results[:5]}
+    ranked_results.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    return {"query": payload.query, "results": [entry[2] for entry in ranked_results[:10]]}

@@ -13,7 +13,9 @@ client = TestClient(app)
 def test_health_endpoint():
     response = client.get('/health')
     assert response.status_code == 200
-    assert response.json() == {'status': 'ok'}
+    assert response.json() == {'status': 'ok', 'database': 'connected'}
+    assert response.headers['x-request-id']
+    assert response.headers['cache-control'] == 'no-store'
 
 
 def test_briefing_endpoint():

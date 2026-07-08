@@ -28,6 +28,8 @@ def test_people_can_be_created_and_listed():
     assert list_response.status_code == 200
     data = list_response.json()
     assert data['items']
+    assert data['total'] >= len(data['items'])
+    assert data['limit'] == 50
     assert any(item['name'] == 'Mina' for item in data['items'])
 
 
