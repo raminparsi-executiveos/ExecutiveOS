@@ -17,7 +17,10 @@ def test_login_protects_memory_endpoints(monkeypatch):
     monkeypatch.setenv('SESSION_SECRET', 'test-secret-that-is-long-and-random')
 
     status = client.get('/auth/status')
-    assert status.json() == {'required': True, 'configured': True}
+    status_payload = status.json()
+    assert status_payload['required'] is True
+    assert status_payload['configured'] is True
+    assert all(status_payload['checks'].values())
     assert client.get('/briefing').status_code == 401
 
     rejected = client.post('/auth/login', json={'username': 'owner', 'password': 'wrong'})
@@ -38,5 +41,9 @@ def test_render_fails_closed_without_credentials(monkeypatch):
     monkeypatch.setenv('RENDER', 'true')
     monkeypatch.delenv('EXECUTIVEOS_PASSWORD', raising=False)
     monkeypatch.delenv('SESSION_SECRET', raising=False)
-    assert client.get('/auth/status').json() == {'required': True, 'configured': False}
+    status_payload = client.get('/auth/status').json()
+    assert status_payload['required'] is True
+    assert status_payload['configured'] is False
+    assert status_payload['checks']['password_present'] is False
+    assert status_payload['checks']['session_secret_present'] is False
     assert client.get('/briefing').status_code == 503

@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .ai import SuggestedUpdate, analyze_capture
-from .auth import auth_configured, auth_required, authenticate, require_auth
+from .auth import auth_configuration_checks, auth_configured, auth_required, authenticate, require_auth
 from .database import Base, engine, get_db
 from .models import CaptureRecord, Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue
 from .schemas import (
@@ -407,7 +407,12 @@ def health(db: Session = Depends(get_db)):
 
 @app.get("/auth/status")
 def authentication_status():
-    return {"required": auth_required(), "configured": auth_configured()}
+    return {
+        "required": auth_required(),
+        "configured": auth_configured(),
+        "checks": auth_configuration_checks(),
+        "requirements": {"password_min_length": 12, "session_secret_min_length": 32},
+    }
 
 
 @app.post("/auth/login")

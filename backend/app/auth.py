@@ -25,9 +25,19 @@ def auth_required() -> bool:
 
 
 def auth_configured() -> bool:
+    checks = auth_configuration_checks()
+    return checks["password_valid"] and checks["session_secret_valid"]
+
+
+def auth_configuration_checks() -> dict[str, bool]:
     password = os.getenv("EXECUTIVEOS_PASSWORD", "")
     secret = os.getenv("SESSION_SECRET", "")
-    return len(password) >= 12 and len(secret) >= 32
+    return {
+        "password_present": bool(password),
+        "password_valid": len(password) >= 12,
+        "session_secret_present": bool(secret),
+        "session_secret_valid": len(secret) >= 32,
+    }
 
 
 def _encode(value: bytes) -> str:

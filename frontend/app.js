@@ -54,6 +54,7 @@ let authToken = storedToken();
 let authState = 'loading';
 let authMessage = '';
 let authIsRequired = false;
+let authConfigurationIssue = '';
 
 async function safeJsonFetch(url, options) {
   const headers = new Headers(options?.headers || {});
@@ -256,7 +257,7 @@ function renderAuthentication() {
     return;
   }
   if (authState === 'configuration_error') {
-    app.innerHTML = '<section class="auth-card"><h1>ExecutiveOS</h1><div class="error" role="alert">Login is not configured. Set EXECUTIVEOS_PASSWORD and SESSION_SECRET on the backend service.</div></section>';
+    app.innerHTML = `<section class="auth-card"><h1>ExecutiveOS</h1><div class="error" role="alert">${escapeHtml(authConfigurationIssue || 'Login is not configured. Check the backend environment variables.')}</div></section>`;
     return;
   }
   app.innerHTML = `
@@ -317,6 +318,13 @@ async function initialize() {
     const status = await safeJsonFetch(apiUrl('/auth/status'));
     authIsRequired = status.required;
     if (status.required && !status.configured) {
+      const checks = status.checks || {};
+      const failures = [];
+      if (!checks.password_present) failures.push('EXECUTIVEOS_PASSWORD is not reaching the backend');
+      else if (!checks.password_valid) failures.push('EXECUTIVEOS_PASSWORD is shorter than 12 characters');
+      if (!checks.session_secret_present) failures.push('SESSION_SECRET is not reaching the backend');
+      else if (!checks.session_secret_valid) failures.push('SESSION_SECRET is shorter than 32 characters');
+      authConfigurationIssue = failures.length ? failures.join('. ') : 'Login configuration is incomplete.';
       authState = 'configuration_error';
     } else {
       authState = status.required && !authToken ? 'unauthenticated' : 'authenticated';
