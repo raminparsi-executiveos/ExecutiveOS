@@ -195,6 +195,14 @@ button:disabled {
   color: #64748b;
 }
 
+.empty-notice {
+  padding: 12px 14px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .panel {
   background: white;
   border: 1px solid #e2e8f0;

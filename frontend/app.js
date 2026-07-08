@@ -376,6 +376,12 @@ function renderPanel() {
               <input class="approval-toggle" type="checkbox" data-index="${index}" ${selectedUpdateIndices.includes(index) ? 'checked' : ''} />
               <span><strong>${escapeHtml(humanize(item.type))}</strong> — ${escapeHtml(item.name || item.title || item.details || 'Update')}
               ${item.company ? `<small>Company: ${escapeHtml(item.company)}</small>` : ''}
+              ${item.role ? `<small>Role: ${escapeHtml(item.role)}</small>` : ''}
+              ${item.owner ? `<small>Owner: ${escapeHtml(item.owner)}</small>` : ''}
+              ${item.value ? `<small>Value: ${escapeHtml(item.value)}${item.trend ? ` · ${escapeHtml(item.trend)}` : ''}</small>` : ''}
+              ${item.final_decision ? `<small>Decision: ${escapeHtml(item.final_decision)}</small>` : ''}
+              ${item.reasoning ? `<small>Reasoning: ${escapeHtml(item.reasoning)}</small>` : ''}
+              ${item.risks?.length ? `<small>Risks: ${escapeHtml(item.risks.join(', '))}</small>` : ''}
               ${item.details ? `<small>${escapeHtml(item.details)}</small>` : ''}</span>
             </label>
           `).join('') : '<p class="muted">No reliable structured updates were found. Add a person, company, project, decision, or metric and try again.</p>'}
@@ -426,6 +432,7 @@ function renderPanel() {
       ${meetingPrep ? `
         <div class="output">
           <h3>${escapeHtml(meetingPrep.meeting)}</h3>
+          ${meetingPrep.context_found === false ? '<p class="empty-notice" role="status">No matching executive memory was found. This agenda is a starting template; add more specific context or capture the meeting details first.</p>' : ''}
           <h4>Proposed agenda</h4>${renderList(meetingPrep.agenda)}
           <div class="briefing-grid">
             <article><h4>People</h4>${renderList(meetingPrep.related_people)}</article>

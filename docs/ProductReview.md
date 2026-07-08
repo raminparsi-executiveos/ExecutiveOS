@@ -16,6 +16,15 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Improve small-screen navigation and panel layout.
 - [x] Add a dependency lockfile so the documented frontend build is reproducible.
 - [x] Preserve visible AI-versus-local-preview labeling and explicit user approval.
+- [x] Scope named-company search results so broad language cannot pull in other companies.
+- [x] Answer `why`, `role`, `company`, and `owner` questions with the matching structured field.
+- [x] Support broad decision-review questions even when they do not name a decision.
+- [x] Extract high-confidence project ownership, metrics, roles, and decisions in local preview mode.
+- [x] Never suggest or report unsupported `note` objects as saved memory.
+- [x] Enrich company meeting prep from stored company projects, KPIs, people, and issues.
+- [x] Deduplicate shorthand company-index labels against richer normalized records.
+- [x] Clearly label a meeting agenda when no matching memory was found.
+- [x] Show decision reasoning, owners, roles, values, trends, and risks during capture approval.
 
 ## Sample acceptance scenarios
 
@@ -27,6 +36,10 @@ Representative workflows were exercised against the API and shipping frontend.
 | `Completely New Topic` | Meeting-prep context sections remain empty instead of inventing relevance. |
 | `Morgan owns the Zephyr expansion...` | Capture suggestions require review; only selected updates are saved. |
 | Unstructured text with no reliable entities | A clear empty state appears and saving is unavailable. |
+| `What is happening at RYSE?` | Only RYSE company and issue context appears. |
+| `Who owns PM quality?` | The direct answer is `Julio`. |
+| `Revenue is $2.4M, up 12% this quarter.` | Local preview proposes a Revenue metric with the full decimal value and trend. |
+| `We decided to pause the Atlas launch because compliance is not ready.` | Local preview preserves both the decision and its reasoning. |
 
 ## Verification commands
 

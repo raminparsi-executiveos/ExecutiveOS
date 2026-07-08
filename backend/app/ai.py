@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class SuggestedUpdate(BaseModel):
-    type: str
+    type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric"]
     name: str = ""
     title: str = ""
     company: str = ""

@@ -46,12 +46,12 @@ def test_briefing_and_meeting_prep_and_search_work():
     assert search['results'][0]['title'] == 'Julio promotion and pay increase'
     assert 'Increase census' not in [result['title'] for result in search['results']]
     assert 'RYSE Wellness' not in [result['title'] for result in search['results']]
-    assert search['answer'] == search['results'][0]['summary']
+    assert 'align incentives' in search['answer']
 
     company_search = client.post('/search', json={'query': "What is Julio's company?"}).json()
     assert company_search['results'][0]['type'] == 'person'
     assert company_search['results'][0]['title'] == 'Julio'
-    assert 'at PEC' in company_search['answer']
+    assert company_search['answer'] == 'PEC'
     assert 'EverPole' not in [result['title'] for result in company_search['results']]
 
     for name, role in [('Juli', 'Operations Analyst'), ('Juliana Gomez', 'Lead Designer')]:

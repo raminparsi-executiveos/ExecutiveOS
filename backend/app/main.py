@@ -128,7 +128,7 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
 
 def _search_intent_boost(model: type[Any], query: str) -> int:
     tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
-    if tokens & {"why", "decide", "decided", "decision", "promote", "promoted", "promotion"}:
+    if tokens & {"why", "decide", "decided", "decision", "decisions", "promote", "promoted", "promotion"}:
         return 30 if model is Decision else 0
     if tokens & {"meeting", "agenda", "prep"}:
         return 8 if model is Meeting else 0
@@ -136,8 +136,10 @@ def _search_intent_boost(model: type[Any], query: str) -> int:
         return 8 if model is Metric else 0
     if tokens & {"project", "projects", "initiative"}:
         return 8 if model is Project else 0
-    if tokens & {"who", "person", "role"}:
+    if "role" in tokens or "person" in tokens:
         return 8 if model is Person else 0
+    if tokens & {"who", "owner", "owns"}:
+        return 8 if model in {Person, StrategicIssue, Project, SOP} else 0
     if "company" in tokens:
         if model is Person:
             return 12
@@ -184,6 +186,20 @@ def _result_summary(item: Any) -> str:
     if isinstance(item, Person):
         role = item.role or "Person"
         return f"{role} at {item.company}" if item.company else role
+    if isinstance(item, StrategicIssue):
+        details = [item.status.capitalize() if item.status else "Strategic issue"]
+        if item.owner:
+            details.append(f"owned by {item.owner}")
+        if item.company:
+            details.append(item.company)
+        return " — ".join(details)
+    if isinstance(item, Project):
+        details = [item.objective or item.status.capitalize() or "Project"]
+        if item.owner:
+            details.append(f"owned by {item.owner}")
+        if item.company:
+            details.append(item.company)
+        return " — ".join(details)
     for field in ("final_decision", "summary", "current_thinking", "objective", "description", "role", "purpose", "value", "notes"):
         value = getattr(item, field, None)
         if value:
@@ -200,6 +216,50 @@ COMPANY_ALIASES = {
     "everpole": "EverPole",
     "myndlog": "MyndLog",
 }
+
+
+def _company_in_query(query: str) -> str:
+    return _detect_positive_company(query)
+
+
+def _belongs_to_company(item: Any, company: str) -> bool:
+    if isinstance(item, Company):
+        return item.name.lower() == company.lower()
+    return str(getattr(item, "company", "")).lower() == company.lower()
+
+
+def _answer_for_result(item: Any, query: str) -> str:
+    tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    if isinstance(item, Decision):
+        if "why" in tokens and item.reasoning:
+            return item.reasoning
+        if tokens & {"when", "date"} and item.date:
+            return item.date
+    if isinstance(item, Person):
+        if "company" in tokens and item.company:
+            return item.company
+        if "role" in tokens and item.role:
+            return item.role
+    if isinstance(item, (StrategicIssue, Project, SOP)) and tokens & {"who", "owner", "owns"}:
+        if item.owner:
+            return item.owner
+    if isinstance(item, (StrategicIssue, Project)) and tokens & {"risk", "risks"} and item.risks:
+        return "; ".join(item.risks)
+    return _result_summary(item)
+
+
+def _merge_memory_labels(primary: list[str], supplemental: list[str], company: str = "") -> list[str]:
+    """Keep richer normalized labels while dropping shorthand aliases from company indexes."""
+    company_tokens = set(re.findall(r"[a-z0-9]+", company.lower()))
+    merged: list[str] = []
+    token_sets: list[set[str]] = []
+    for label in [*primary, *supplemental]:
+        tokens = set(re.findall(r"[a-z0-9]+", label.lower())) - company_tokens
+        if not tokens or any(tokens <= existing or existing <= tokens for existing in token_sets):
+            continue
+        merged.append(label)
+        token_sets.append(tokens)
+    return merged
 
 
 def _company_mentions(text: str, alias: str) -> list[re.Match[str]]:
@@ -297,11 +357,72 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
 
     detected_company = _detect_positive_company(text)
 
+    ownership_match = re.search(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+owns\s+(?:the\s+)?([^.!?]+)", text
+    )
+    if ownership_match and not detected_name:
+        owner, project_title = (value.strip() for value in ownership_match.groups())
+        risk_match = re.search(r"\b(?:main\s+)?risk\s+is\s+([^.!?]+)", text, flags=re.IGNORECASE)
+        updates.append({
+            "type": "project",
+            "title": project_title,
+            "owner": owner,
+            "company": detected_company,
+            "risks": [risk_match.group(1).strip()] if risk_match else [],
+            "status": "active",
+            "details": f"{owner} owns {project_title}.",
+        })
+
+    role_match = re.search(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+(?:the\s+)?(.+?)\s+at\s+"
+        r"(?:PEC|Pro Engineering(?: Consulting)?|RYSE(?: Wellness)?|EverPole|MyndLog)\b",
+        text,
+    )
+    if role_match and not detected_name:
+        updates.append({
+            "type": "person",
+            "name": role_match.group(1).strip(),
+            "role": role_match.group(2).strip(),
+            "company": detected_company,
+            "details": "Potential person role and company update.",
+        })
+
+    decision_match = re.search(
+        r"\bwe\s+decided\s+to\s+(.+?)\s+because\s+(.+?)(?:[.!?]|$)", text, flags=re.IGNORECASE
+    )
+    if decision_match:
+        final_decision, reasoning = (value.strip() for value in decision_match.groups())
+        updates.append({
+            "type": "decision",
+            "title": final_decision[0].upper() + final_decision[1:],
+            "company": detected_company,
+            "final_decision": final_decision,
+            "reasoning": reasoning,
+            "details": "Potential decision with stated reasoning.",
+        })
+
+    metric_match = re.search(
+        r"^\s*([A-Za-z][A-Za-z ]+?)\s+is\s+([+-]?\$?[\d,.]+(?:[KMB])?%?)(?:,\s*(.+?))?(?:[.!?]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if metric_match:
+        title, value, trend = metric_match.groups()
+        updates.append({
+            "type": "metric",
+            "title": title.strip(),
+            "value": value.strip(),
+            "trend": (trend or "stable").strip(),
+            "company": detected_company,
+            "details": "Potential metric update.",
+        })
+
     if detected_name:
         updates.append({
             "type": "person",
             "name": detected_name,
             "company": detected_company,
+            "role": role_match.group(2).strip() if role_match and role_match.group(1).strip() == detected_name else "",
             "details": f"Potential person update for {detected_name}.",
         })
 
@@ -326,9 +447,6 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
             "details": "Potential decision about compensation and expanded scope.",
         })
 
-    if not updates:
-        updates.append({"type": "note", "details": "No structured update detected."})
-
     return updates
 
 
@@ -350,7 +468,11 @@ def _classify_capture_text(db: Session, text: str) -> tuple[list[dict[str, Any]]
             analysis.follow_ups,
             "ai",
         )
-    return _fallback_classify_capture_text(text), [], "local_fallback"
+    updates = _fallback_classify_capture_text(text)
+    follow_ups = [] if updates else [
+        "What person, company, project, decision, or metric should be saved from this update?"
+    ]
+    return updates, follow_ups, "local_fallback"
 
 
 def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
@@ -619,6 +741,8 @@ def capture_history(
 @app.post("/meeting-prep")
 def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     meeting_title = payload.meeting or "Executive meeting"
+    company_name = _company_in_query(meeting_title)
+    company = db.query(Company).filter(Company.name.ilike(company_name)).first() if company_name else None
     issues = _rank_for_context(db.query(StrategicIssue).all(), SEARCH_CONFIG[StrategicIssue][1], meeting_title)
     decisions = _rank_for_context(db.query(Decision).all(), SEARCH_CONFIG[Decision][1], meeting_title)
     people = _rank_for_context(db.query(Person).all(), SEARCH_CONFIG[Person][1], meeting_title)
@@ -627,23 +751,34 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     projects = _rank_for_context(db.query(Project).all(), SEARCH_CONFIG[Project][1], meeting_title)
     action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
+    supplemental_people = list(company.people or [] if company else [])
+    supplemental_issues = list(company.strategic_issues or [] if company else [])
+    supplemental_projects = list(company.projects or [] if company else [])
+    supplemental_decisions = list(company.decisions or [] if company else [])
+    related_people = _merge_memory_labels([person.name for person in people[:3]], supplemental_people, company_name)[:5]
+    related_issues = _merge_memory_labels([issue.title for issue in issues[:3]], supplemental_issues, company_name)[:5]
+    related_projects = _merge_memory_labels([project.title for project in projects[:3]], supplemental_projects, company_name)[:5]
+    related_decisions = _merge_memory_labels([decision.title for decision in decisions[:3]], supplemental_decisions, company_name)[:5]
+    metric_summaries = [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]]
+    metric_summaries = list(dict.fromkeys(metric_summaries + list(company.kpis or [] if company else [])))[:5]
     agenda = [
         f"Review current context for {meeting_title}",
-        f"Discuss open decisions: {', '.join(decision.title for decision in decisions[:2]) if decisions else 'No open decisions'}",
-        f"Validate strategic issues: {', '.join(issue.title for issue in issues[:2]) if issues else 'No active strategic issues'}",
-        f"Review active projects: {', '.join(project.title for project in projects[:2]) if projects else 'No active projects'}",
+        f"Discuss open decisions: {', '.join(related_decisions[:2]) if related_decisions else 'No open decisions'}",
+        f"Validate strategic issues: {', '.join(related_issues[:2]) if related_issues else 'No active strategic issues'}",
+        f"Review active projects: {', '.join(related_projects[:2]) if related_projects else 'No active projects'}",
         "Confirm risks, action items, and follow-up owners",
     ]
     return {
         "meeting": meeting_title,
+        "context_found": bool(company or issues or decisions or people or meetings or metrics or projects),
         "agenda": agenda,
-        "related_people": [person.name for person in people[:3]],
-        "related_strategic_issues": [issue.title for issue in issues[:3]],
-        "related_projects": [project.title for project in projects[:3]],
-        "open_decisions": [decision.title for decision in decisions[:3]],
+        "related_people": related_people,
+        "related_strategic_issues": related_issues,
+        "related_projects": related_projects,
+        "open_decisions": related_decisions,
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
         "action_items": action_items[:5],
-        "metrics": [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]],
+        "metrics": metric_summaries,
         "risks": risks[:5],
     }
 
@@ -651,13 +786,22 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
 @app.post("/search")
 def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     ranked_results = []
+    query_tokens = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
+    target_company = _company_in_query(payload.query)
     for model, (title_field, fields) in SEARCH_CONFIG.items():
         for item in db.query(model).all():
+            if target_company and not _belongs_to_company(item, target_company):
+                continue
             score = _match_score(item, fields, payload.query)
+            intent_score = _search_intent_boost(model, payload.query)
+            if not score and model is Decision and query_tokens & {"decision", "decisions"}:
+                score = intent_score
+            if not score and model in {StrategicIssue, Project} and query_tokens & {"risk", "risks"} and item.risks:
+                score = 12
             if score:
-                score += _search_intent_boost(model, payload.query)
+                score += intent_score
                 score += _entity_name_boost(item, title_field, payload.query)
-                ranked_results.append((score, item.id or 0, {
+                ranked_results.append((score, item.id or 0, item, {
                     "type": RESULT_TYPES[model],
                     "title": getattr(item, title_field),
                     "summary": _result_summary(item),
@@ -669,5 +813,7 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
     # Keep close supporting matches while dropping weak records that happen to
     # share one generic word with the question.
     cutoff = max(1, ranked_results[0][0] - 6)
-    results = [entry[2] for entry in ranked_results if entry[0] >= cutoff][:10]
-    return {"query": payload.query, "answer": results[0]["summary"], "results": results}
+    included = [entry for entry in ranked_results if entry[0] >= cutoff][:10]
+    results = [entry[3] for entry in included]
+    answer = _answer_for_result(included[0][2], payload.query)
+    return {"query": payload.query, "answer": answer, "results": results}
