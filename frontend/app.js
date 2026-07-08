@@ -430,7 +430,7 @@ function renderPanel() {
     <label for="search-input" class="sr-only">Question about executive memory</label>
     <input id="search-input" placeholder="Why did we promote Julio?" />
     <button id="search-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Searching…' : 'Ask ExecutiveOS'}</button>
-    ${searchResults ? `<div class="results">${searchResults.results.length ? searchResults.results.map((result) => `
+    ${searchResults ? `<div class="results"><aside class="focus"><strong>ExecutiveOS answer</strong><p>${escapeHtml(searchResults.answer || 'No matching executive memory found.')}</p></aside>${searchResults.results.length ? searchResults.results.map((result) => `
       <article><span class="badge">${escapeHtml(humanize(result.type))}</span><h3>${escapeHtml(result.title)}</h3><p>${escapeHtml(result.summary)}</p></article>
     `).join('') : '<p class="muted">No matching executive memory found.</p>'}</div>` : ''}
   `;

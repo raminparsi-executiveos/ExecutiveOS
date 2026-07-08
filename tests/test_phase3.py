@@ -43,4 +43,7 @@ def test_briefing_and_meeting_prep_and_search_work():
 
     search = client.post('/search', json={'query': 'Why did we promote Julio?'}).json()
     assert search['results']
-    assert any(result['title'] == 'Julio promotion and pay increase' for result in search['results'])
+    assert search['results'][0]['title'] == 'Julio promotion and pay increase'
+    assert 'Increase census' not in [result['title'] for result in search['results']]
+    assert 'RYSE Wellness' not in [result['title'] for result in search['results']]
+    assert search['answer'] == search['results'][0]['summary']

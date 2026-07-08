@@ -99,12 +99,11 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
         return 20
 
     normalized_query = query.lower()
-    stop_words = {"a", "an", "and", "are", "for", "from", "in", "is", "me", "my", "of", "on", "the", "to", "what", "with"}
+    stop_words = {"a", "an", "and", "are", "did", "do", "does", "for", "from", "in", "is", "me", "my", "of", "on", "the", "to", "we", "what", "why", "with"}
     tokens = set(re.findall(r"[a-z0-9]+", normalized_query)) - stop_words
     synonyms = {
-        "promote": ["promotion", "promoted", "raise", "increase", "pay"],
-        "promoted": ["promotion", "promoted", "raise", "increase", "pay"],
-        "why": ["reason", "context", "decision"],
+        "promote": ["promotion", "promoted"],
+        "promoted": ["promotion", "promote"],
         "what": ["title", "summary", "context"],
         "happening": ["status", "active", "current", "issue", "project"],
     }
@@ -115,9 +114,26 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
             continue
         for synonym in synonyms.get(token, []):
             if synonym in haystack:
-                score += 1
+                score += 3
                 break
     return score
+
+
+def _search_intent_boost(model: type[Any], query: str) -> int:
+    tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    if tokens & {"why", "decide", "decided", "decision", "promote", "promoted", "promotion"}:
+        return 12 if model is Decision else 0
+    if tokens & {"meeting", "agenda", "prep"}:
+        return 8 if model is Meeting else 0
+    if tokens & {"metric", "metrics", "kpi", "trend"}:
+        return 8 if model is Metric else 0
+    if tokens & {"project", "projects", "initiative"}:
+        return 8 if model is Project else 0
+    if tokens & {"who", "person", "role"}:
+        return 8 if model is Person else 0
+    if "company" in tokens:
+        return 8 if model in {Person, Company} else 0
+    return 0
 
 
 SEARCH_CONFIG = {
@@ -621,6 +637,7 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
         for item in db.query(model).all():
             score = _match_score(item, fields, payload.query)
             if score:
+                score += _search_intent_boost(model, payload.query)
                 ranked_results.append((score, item.id or 0, {
                     "type": RESULT_TYPES[model],
                     "title": getattr(item, title_field),
@@ -628,4 +645,10 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                 }))
 
     ranked_results.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
-    return {"query": payload.query, "results": [entry[2] for entry in ranked_results[:10]]}
+    if not ranked_results:
+        return {"query": payload.query, "answer": "No matching executive memory found.", "results": []}
+    # Keep close supporting matches while dropping weak records that happen to
+    # share one generic word with the question.
+    cutoff = max(1, ranked_results[0][0] - 6)
+    results = [entry[2] for entry in ranked_results if entry[0] >= cutoff][:10]
+    return {"query": payload.query, "answer": results[0]["summary"], "results": results}
