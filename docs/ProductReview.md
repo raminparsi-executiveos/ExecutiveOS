@@ -43,6 +43,7 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Analyze screenshots with structured vision output and the existing approval workflow.
 - [x] Validate screenshot type and size while avoiding persistent image storage.
 - [x] Clearly report when screenshot analysis is unavailable without an AI connection.
+- [x] Keep screenshots optional and enable text-only Capture immediately as the user types.
 
 ## Sample acceptance scenarios
 

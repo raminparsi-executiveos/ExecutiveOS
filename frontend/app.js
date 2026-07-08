@@ -119,6 +119,10 @@ function render() {
       textarea.value = captureText;
       textarea.addEventListener('input', (event) => {
         captureText = event.target.value;
+        if (button) {
+          button.disabled = submitting || (!captureText.trim() && !screenshotData);
+          button.textContent = screenshotData ? 'Analyze and review screenshot' : 'Classify and review updates';
+        }
         if (classificationResult) {
           classificationResult = null;
           selectedUpdateIndices = [];
