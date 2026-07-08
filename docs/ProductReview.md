@@ -39,6 +39,10 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Rank meeting context by topic within a company, so PEC PM and PEC sales prep diverge.
 - [x] Filter company-index projects, issues, decisions, people, KPIs, and captures to the meeting topic.
 - [x] Deduplicate repeated risks and action items in meeting prep.
+- [x] Accept PNG, JPEG, and WebP screenshots as Capture input.
+- [x] Analyze screenshots with structured vision output and the existing approval workflow.
+- [x] Validate screenshot type and size while avoiding persistent image storage.
+- [x] Clearly report when screenshot analysis is unavailable without an AI connection.
 
 ## Sample acceptance scenarios
 

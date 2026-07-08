@@ -42,6 +42,8 @@ let briefing = null;
 let meetingPrep = null;
 let searchResults = null;
 let captureText = '';
+let screenshotData = '';
+let screenshotName = '';
 let searchQuery = '';
 let meetingQuery = '';
 let captureResult = null;
@@ -112,6 +114,7 @@ function render() {
   if (active === 'capture') {
     const textarea = app.querySelector('textarea');
     const button = app.querySelector('#capture-submit');
+    const screenshotInput = app.querySelector('#screenshot-input');
     if (textarea) {
       textarea.value = captureText;
       textarea.addEventListener('input', (event) => {
@@ -124,16 +127,47 @@ function render() {
         captureResult = null;
       });
     }
+    screenshotInput?.addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+        setApiError('Use a PNG, JPEG, or WebP screenshot.');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setApiError('Screenshot must be 5 MB or smaller.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        screenshotData = String(reader.result || '');
+        screenshotName = file.name;
+        classificationResult = null;
+        selectedUpdateIndices = [];
+        captureResult = null;
+        apiError = null;
+        render();
+      };
+      reader.onerror = () => setApiError('Screenshot could not be read.');
+      reader.readAsDataURL(file);
+    });
+    app.querySelector('#screenshot-remove')?.addEventListener('click', () => {
+      screenshotData = '';
+      screenshotName = '';
+      classificationResult = null;
+      selectedUpdateIndices = [];
+      render();
+    });
     if (button) {
       button.addEventListener('click', async () => {
-        if (!captureText.trim() || submitting) return;
+        if ((!captureText.trim() && !screenshotData) || submitting) return;
         submitting = true;
         render();
         try {
           classificationResult = await safeJsonFetch(apiUrl('/capture/classify'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: captureText, confirm: true }),
+            body: JSON.stringify({ text: captureText, image_data: screenshotData, confirm: true }),
           });
           selectedUpdateIndices = (classificationResult.suggested_updates || []).map((_, index) => index);
           captureResult = null;
@@ -159,7 +193,7 @@ function render() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              text: captureText,
+              text: captureText.trim() || `Screenshot capture: ${screenshotName}`,
               approved_updates: approvedUpdates,
               classification_source: classificationResult?.classification_source || 'unknown',
             }),
@@ -172,6 +206,8 @@ function render() {
           classificationResult = null;
           selectedUpdateIndices = [];
           captureText = '';
+          screenshotData = '';
+          screenshotName = '';
           apiError = null;
         } catch (error) {
           setApiError(error.message);
@@ -361,10 +397,16 @@ function renderPanel() {
   if (active === 'capture') {
     return `
       <h2>Capture</h2>
-      <p>Enter natural language, review the suggested updates, and approve the ones that should be saved.</p>
+      <p>Enter natural language or attach a screenshot, then review and approve the structured updates.</p>
       <label for="capture-input" class="sr-only">Executive update</label>
       <textarea id="capture-input" rows="6" placeholder="Example: Morgan owns the Zephyr expansion. The main risk is distributor capacity."></textarea>
-      <button id="capture-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Working…' : 'Classify and review updates'}</button>
+      <div class="screenshot-controls">
+        <label class="file-button" for="screenshot-input">Attach screenshot</label>
+        <input id="screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" />
+        <span class="muted">PNG, JPEG, or WebP · 5 MB maximum</span>
+      </div>
+      ${screenshotData ? `<div class="screenshot-preview"><img src="${screenshotData}" alt="Screenshot selected for capture" /><div><strong>${escapeHtml(screenshotName)}</strong><button id="screenshot-remove" type="button" class="secondary">Remove</button></div></div>` : ''}
+      <button id="capture-submit" style="margin-top: 12px;" ${submitting || (!captureText.trim() && !screenshotData) ? 'disabled' : ''}>${submitting ? 'Working…' : screenshotData ? 'Analyze and review screenshot' : 'Classify and review updates'}</button>
       ${classificationResult ? `
         <div id="classification-review" style="margin-top: 12px;">
           <div class="section-heading">

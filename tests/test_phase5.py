@@ -75,6 +75,48 @@ def test_ai_classification_handles_arbitrary_executive_memory(monkeypatch):
     assert any(project['title'] == 'Northstar launch' and project['owner'] == 'Priya' for project in projects)
 
 
+def test_screenshot_capture_uses_vision_and_keeps_review_flow(monkeypatch):
+    image_data = 'data:image/png;base64,iVBORw0KGgo='
+
+    def fake_vision_analysis(text, memory_context, supplied_image):
+        assert text == 'Extract the revenue update from this dashboard.'
+        assert 'Companies:' in memory_context
+        assert supplied_image == image_data
+        return CaptureAnalysis(suggested_updates=[
+            SuggestedUpdate(
+                type='metric', title='Screenshot revenue', company='PEC',
+                value='$3.1M', trend='up 8%', source='Dashboard screenshot',
+            )
+        ])
+
+    monkeypatch.setattr('app.main.analyze_capture', fake_vision_analysis)
+    response = client.post('/capture/classify', json={
+        'text': 'Extract the revenue update from this dashboard.',
+        'image_data': image_data,
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['classification_source'] == 'ai'
+    assert payload['suggested_updates'][0]['title'] == 'Screenshot revenue'
+    assert payload['suggested_updates'][0]['value'] == '$3.1M'
+
+
+def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
+    assert client.post('/capture/classify', json={'text': ''}).status_code == 422
+    assert client.post('/capture/classify', json={
+        'image_data': 'data:image/svg+xml;base64,PHN2Zz4=',
+    }).status_code == 422
+
+    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory, image: None)
+    unavailable = client.post('/capture/classify', json={
+        'image_data': 'data:image/jpeg;base64,/9j/2Q==',
+    })
+    assert unavailable.status_code == 200
+    assert unavailable.json()['classification_source'] == 'image_unavailable'
+    assert unavailable.json()['suggested_updates'] == []
+    assert unavailable.json()['follow_ups']
+
+
 def test_saved_memory_feeds_briefing_prep_and_search():
     update = SuggestedUpdate(
         type='project',

@@ -26,6 +26,8 @@ The system stores executive memory as structured objects and generates outputs o
 
 Set `OPENAI_API_KEY` to enable AI classification. `OPENAI_MODEL` defaults to `gpt-5.4-mini`. Without a key, Capture uses a limited local preview classifier so development remains usable; production should configure the key.
 
+Capture accepts text and PNG, JPEG, or WebP screenshots up to 5 MB. Screenshot extraction uses the configured vision-capable OpenAI model, returns structured suggestions for review, and does not store the image itself. Text-only capture retains its limited local fallback when AI is unavailable.
+
 Authentication is optional for local development and required on Render. Configure `EXECUTIVEOS_USERNAME` (defaults to `admin`), an `EXECUTIVEOS_PASSWORD` of at least 12 characters, and a random `SESSION_SECRET` of at least 32 characters. The Blueprint generates the session secret, but existing Render services require adding the password manually in the service's Environment page.
 
 ## Render deployment

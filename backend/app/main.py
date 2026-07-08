@@ -569,14 +569,18 @@ def _memory_context(db: Session) -> str:
     return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}"
 
 
-def _classify_capture_text(db: Session, text: str) -> tuple[list[dict[str, Any]], list[str], str]:
-    analysis = analyze_capture(text, _memory_context(db))
+def _classify_capture_text(
+    db: Session, text: str, image_data: str = ""
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    analysis = analyze_capture(text, _memory_context(db), image_data) if image_data else analyze_capture(text, _memory_context(db))
     if analysis:
         return (
             [update.model_dump() for update in analysis.suggested_updates],
             analysis.follow_ups,
             "ai",
         )
+    if image_data:
+        return [], ["Screenshot analysis requires a configured and available AI connection."], "image_unavailable"
     updates = _fallback_classify_capture_text(text)
     follow_ups = [] if updates else [
         "What person, company, project, decision, or metric should be saved from this update?"
@@ -798,7 +802,7 @@ def capture(payload: CaptureRequest, db: Session = Depends(get_db), _user: str =
 
 @app.post("/capture/classify")
 def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
-    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
+    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text, payload.image_data)
     return {
         "message": "Classification complete",
         "suggested_updates": suggested_updates,

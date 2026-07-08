@@ -73,7 +73,7 @@ fields because details may be used only as supporting context.
 """
 
 
-def analyze_capture(text: str, memory_context: str) -> CaptureAnalysis | None:
+def analyze_capture(text: str, memory_context: str, image_data: str = "") -> CaptureAnalysis | None:
     """Return structured AI extraction, or None when AI is not configured/available."""
     if not os.getenv("OPENAI_API_KEY"):
         return None
@@ -81,13 +81,21 @@ def analyze_capture(text: str, memory_context: str) -> CaptureAnalysis | None:
     try:
         from openai import OpenAI
 
+        capture_prompt = text.strip() or "Extract the executive-memory facts visible in this screenshot."
+        user_content = [{
+            "type": "input_text",
+            "text": f"Known memory:\n{memory_context}\n\nCapture context:\n{capture_prompt}",
+        }]
+        if image_data:
+            user_content.append({"type": "input_image", "image_url": image_data})
+
         response = OpenAI(timeout=20.0, max_retries=1).responses.parse(
             model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
             input=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": f"Known memory:\n{memory_context}\n\nCapture:\n{text}",
+                    "content": user_content,
                 },
             ],
             text_format=CaptureAnalysis,
