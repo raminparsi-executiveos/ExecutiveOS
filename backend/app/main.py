@@ -99,7 +99,11 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
         return 20
 
     normalized_query = query.lower()
-    stop_words = {"a", "an", "and", "are", "did", "do", "does", "for", "from", "in", "is", "me", "my", "of", "on", "the", "to", "we", "what", "why", "with"}
+    stop_words = {
+        "a", "an", "and", "are", "company", "did", "do", "does", "for", "from",
+        "in", "is", "me", "meeting", "metric", "my", "of", "on", "person", "project",
+        "role", "s", "the", "to", "we", "what", "why", "with",
+    }
     tokens = set(re.findall(r"[a-z0-9]+", normalized_query)) - stop_words
     synonyms = {
         "promote": ["promotion", "promoted"],
@@ -122,7 +126,7 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
 def _search_intent_boost(model: type[Any], query: str) -> int:
     tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
     if tokens & {"why", "decide", "decided", "decision", "promote", "promoted", "promotion"}:
-        return 12 if model is Decision else 0
+        return 30 if model is Decision else 0
     if tokens & {"meeting", "agenda", "prep"}:
         return 8 if model is Meeting else 0
     if tokens & {"metric", "metrics", "kpi", "trend"}:
@@ -132,8 +136,17 @@ def _search_intent_boost(model: type[Any], query: str) -> int:
     if tokens & {"who", "person", "role"}:
         return 8 if model is Person else 0
     if "company" in tokens:
-        return 8 if model in {Person, Company} else 0
+        if model is Person:
+            return 12
+        return 4 if model is Company else 0
     return 0
+
+
+def _entity_name_boost(item: Any, title_field: str, query: str) -> int:
+    entity_name = str(getattr(item, title_field, "")).strip().lower()
+    if not entity_name:
+        return 0
+    return 20 if re.search(rf"\b{re.escape(entity_name)}\b", query.lower()) else 0
 
 
 SEARCH_CONFIG = {
@@ -638,6 +651,7 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
             score = _match_score(item, fields, payload.query)
             if score:
                 score += _search_intent_boost(model, payload.query)
+                score += _entity_name_boost(item, title_field, payload.query)
                 ranked_results.append((score, item.id or 0, {
                     "type": RESULT_TYPES[model],
                     "title": getattr(item, title_field),

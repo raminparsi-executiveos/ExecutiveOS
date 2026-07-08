@@ -47,3 +47,9 @@ def test_briefing_and_meeting_prep_and_search_work():
     assert 'Increase census' not in [result['title'] for result in search['results']]
     assert 'RYSE Wellness' not in [result['title'] for result in search['results']]
     assert search['answer'] == search['results'][0]['summary']
+
+    company_search = client.post('/search', json={'query': "What is Julio's company?"}).json()
+    assert company_search['results'][0]['type'] == 'person'
+    assert company_search['results'][0]['title'] == 'Julio'
+    assert 'at PEC' in company_search['answer']
+    assert 'EverPole' not in [result['title'] for result in company_search['results']]
