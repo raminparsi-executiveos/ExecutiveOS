@@ -5,7 +5,7 @@ services:
     runtime: python-3.13
     plan: free
     branch: main
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+    buildCommand: CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup python -m pip install --upgrade pip setuptools wheel && CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     root: backend
 
