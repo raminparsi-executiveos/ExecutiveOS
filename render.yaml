@@ -4,8 +4,8 @@ services:
     env: docker
     plan: free
     branch: main
-    dockerfilePath: Dockerfile
-    root: backend
+    root: .
+    dockerfilePath: backend/Dockerfile
 
   - type: static_site
     name: executiveos-frontend
