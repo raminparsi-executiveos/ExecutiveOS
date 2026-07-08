@@ -6,6 +6,9 @@ const sections = [
 ];
 
 const app = document.getElementById('app');
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const apiUrl = (path) => `${API_BASE}${path}`;
+
 let active = 'capture';
 let briefing = null;
 let meetingPrep = null;
@@ -46,7 +49,7 @@ function render() {
     }
     if (button) {
       button.addEventListener('click', async () => {
-        const classifyResponse = await fetch('http://127.0.0.1:8000/capture/classify', {
+        const classifyResponse = await fetch(apiUrl('/capture/classify'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: captureText, confirm: true }),
@@ -62,7 +65,7 @@ function render() {
     if (confirmButton) {
       confirmButton.addEventListener('click', async () => {
         const approvedUpdates = (classificationResult?.suggested_updates || []).filter((_, index) => selectedUpdateIndices.includes(index));
-        const confirmResponse = await fetch('http://127.0.0.1:8000/capture/confirm', {
+        const confirmResponse = await fetch(apiUrl('/capture/confirm'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -94,7 +97,7 @@ function render() {
     if (button) {
       button.addEventListener('click', async () => {
         const input = app.querySelector('#prep-input');
-        const response = await fetch('http://127.0.0.1:8000/meeting-prep', {
+        const response = await fetch(apiUrl('/meeting-prep'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ meeting: input.value || 'Executive meeting' }),
@@ -116,7 +119,7 @@ function render() {
     }
     if (button) {
       button.addEventListener('click', async () => {
-        const response = await fetch('http://127.0.0.1:8000/search', {
+        const response = await fetch(apiUrl('/search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery || 'Why did we promote Julio?' }),
@@ -155,7 +158,7 @@ function renderPanel() {
 
   if (active === 'briefing') {
     if (!briefing) {
-      fetch('http://127.0.0.1:8000/briefing')
+      fetch(apiUrl('/briefing'))
         .then((response) => response.json())
         .then((data) => {
           briefing = data;

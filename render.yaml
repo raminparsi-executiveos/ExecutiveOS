@@ -1,0 +1,22 @@
+services:
+  - type: web_service
+    name: executiveos-backend
+    env: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    root: backend
+
+  - type: static_site
+    name: executiveos-frontend
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    root: frontend
+    envVars:
+      - key: VITE_API_URL
+        fromService: executiveos-backend
+        value: "${RENDER_SERVICE_URL}"
