@@ -359,6 +359,7 @@ function renderPanel() {
             <label class="suggestion">
               <input class="approval-toggle" type="checkbox" data-index="${index}" ${selectedUpdateIndices.includes(index) ? 'checked' : ''} />
               <span><strong>${escapeHtml(humanize(item.type))}</strong> — ${escapeHtml(item.name || item.title || item.details || 'Update')}
+              ${item.company ? `<small>Company: ${escapeHtml(item.company)}</small>` : ''}
               ${item.details ? `<small>${escapeHtml(item.details)}</small>` : ''}</span>
             </label>
           `).join('')}

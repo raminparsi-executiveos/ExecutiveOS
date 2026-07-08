@@ -127,3 +127,33 @@ def test_capture_confirmation_rolls_back_partial_updates(monkeypatch):
     assert response.status_code == 500
     with SessionLocal() as db:
         assert db.query(Company).filter(Company.name == company_name).first() is None
+
+
+def test_company_correction_respects_negation_and_aliases(monkeypatch):
+    client.post(
+        '/capture/confirm',
+        json={
+            'text': 'Julio is with RYSE.',
+            'approved_updates': [SuggestedUpdate(type='person', name='Julio', company='RYSE Wellness').model_dump()],
+        },
+    )
+
+    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory_context: None)
+    correction = 'Julio is with Pro Engineering, not RYSE.'
+    classified = client.post('/capture/classify', json={'text': correction}).json()
+    person_update = next(update for update in classified['suggested_updates'] if update['type'] == 'person')
+    assert person_update['company'] == 'PEC'
+
+    saved = client.post(
+        '/capture/confirm',
+        json={'text': correction, 'approved_updates': classified['suggested_updates']},
+    )
+    assert saved.status_code == 200
+
+    people = client.get('/objects/people').json()['items']
+    julio = next(person for person in people if person['name'] == 'Julio')
+    assert julio['company'] == 'PEC'
+
+    results = client.post('/search', json={'query': 'Julio company'}).json()['results']
+    julio_result = next(result for result in results if result['type'] == 'person' and result['title'] == 'Julio')
+    assert 'at PEC' in julio_result['summary']

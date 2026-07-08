@@ -147,11 +147,52 @@ def _rank_for_context(items: list[Any], fields: list[str], query: str) -> list[A
 
 
 def _result_summary(item: Any) -> str:
+    if isinstance(item, Person):
+        role = item.role or "Person"
+        return f"{role} at {item.company}" if item.company else role
     for field in ("final_decision", "summary", "current_thinking", "objective", "description", "role", "purpose", "value", "notes"):
         value = getattr(item, field, None)
         if value:
             return _stringify_value(value)
     return f"{item.__class__.__name__.replace('StrategicIssue', 'Strategic issue')} memory"
+
+
+COMPANY_ALIASES = {
+    "pro engineering consulting": "PEC",
+    "pro engineering": "PEC",
+    "pec": "PEC",
+    "ryse wellness": "RYSE Wellness",
+    "ryse": "RYSE Wellness",
+    "everpole": "EverPole",
+    "myndlog": "MyndLog",
+}
+
+
+def _company_mentions(text: str, alias: str) -> list[re.Match[str]]:
+    return list(re.finditer(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE))
+
+
+def _mention_is_negated(text: str, match: re.Match[str]) -> bool:
+    prefix = text[max(0, match.start() - 20):match.start()]
+    return bool(re.search(r"\bnot(?:\s+(?:with|at|part of))?\s*$", prefix, flags=re.IGNORECASE))
+
+
+def _detect_positive_company(text: str) -> str:
+    for alias in sorted(COMPANY_ALIASES, key=len, reverse=True):
+        for match in _company_mentions(text, alias):
+            if not _mention_is_negated(text, match):
+                return COMPANY_ALIASES[alias]
+    return ""
+
+
+def _normalize_company(company: str) -> str:
+    return COMPANY_ALIASES.get(company.strip().lower(), company.strip())
+
+
+def _company_is_explicitly_negated(text: str, company: str) -> bool:
+    normalized = _normalize_company(company)
+    aliases = [alias for alias, canonical in COMPANY_ALIASES.items() if canonical == normalized]
+    return any(_mention_is_negated(text, match) for alias in aliases for match in _company_mentions(text, alias))
 
 
 def _upsert_company(db: Session, name: str) -> Company:
@@ -220,16 +261,13 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
             detected_name = candidate
             break
 
-    detected_company = ""
-    for candidate in ["PEC", "RYSE Wellness", "EverPole", "MyndLog"]:
-        if candidate.lower() in lowered:
-            detected_company = candidate
-            break
+    detected_company = _detect_positive_company(text)
 
     if detected_name:
         updates.append({
             "type": "person",
             "name": detected_name,
+            "company": detected_company,
             "details": f"Potential person update for {detected_name}.",
         })
 
@@ -262,7 +300,10 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
 
 def _memory_context(db: Session) -> str:
     companies = ", ".join(company.name for company in db.query(Company).all()) or "None"
-    people = ", ".join(person.name for person in db.query(Person).all()) or "None"
+    people = ", ".join(
+        f"{person.name} ({person.role or 'no role'}; {person.company or 'no company'})"
+        for person in db.query(Person).all()
+    ) or "None"
     issues = ", ".join(issue.title for issue in db.query(StrategicIssue).all()) or "None"
     return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}"
 
@@ -319,17 +360,16 @@ def _apply_approved_updates(
             detected_name = candidate
             break
 
-    detected_company = ""
-    for candidate in ["PEC", "RYSE Wellness", "EverPole", "MyndLog"]:
-        if candidate.lower() in lowered:
-            detected_company = candidate
-            break
+    explicit_company = _detect_positive_company(text)
 
     for raw_update in approved_updates:
         update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
         update_type = update.get("type")
         update_name = update.get("name") or detected_name
-        update_company = update.get("company") or detected_company
+        proposed_company = _normalize_company(update.get("company") or "")
+        if proposed_company and _company_is_explicitly_negated(text, proposed_company):
+            proposed_company = ""
+        update_company = explicit_company or proposed_company
         if update_type == "person" and update_name:
             _upsert_person(
                 db,

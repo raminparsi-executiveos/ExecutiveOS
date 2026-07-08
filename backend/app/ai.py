@@ -59,6 +59,8 @@ types: person, company, strategic_issue, project, decision, meeting, sop, docume
 metric. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
 dates when present. Use ISO dates when the date is explicit. Do not create tasks or raw
 notes. Put useful missing-context questions in follow_ups. Never invent facts.
+Treat explicit corrections as authoritative. In phrases such as "X, not Y", never
+assign Y. A person update that changes employment must include the corrected company.
 """
 
 
