@@ -38,8 +38,7 @@ function render() {
   app.innerHTML = `
     <h1>ExecutiveOS</h1>
     <p>AI-first executive memory and decision platform.</p>
-${apiError ? `      <div style="border:1px solid #d00; padding:12px; margin-bottom:16px; background:#fee;"><strong>API error:</strong> ${apiError}</div>
-` : ''}`
+    ${apiError ? `<div style="border:1px solid #d00; padding:12px; margin-bottom:16px; background:#fee;"><strong>API error:</strong> ${apiError}</div>` : ''}
     <nav>
       ${sections.map((section) => `<button class="${section.key === active ? 'active' : ''}" data-key="${section.key}">${section.label}</button>`).join('')}
     </nav>
