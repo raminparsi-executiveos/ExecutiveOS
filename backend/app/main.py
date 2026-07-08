@@ -355,6 +355,22 @@ def _unique_captures(captures: list[CaptureRecord], limit: int = 5) -> list[Capt
     return unique
 
 
+def _meeting_topic_query(meeting_title: str, company: str) -> str:
+    tokens = re.findall(r"[a-z0-9]+", meeting_title.lower())
+    company_tokens = set(re.findall(r"[a-z0-9]+", company.lower()))
+    for alias, canonical in COMPANY_ALIASES.items():
+        if canonical == company:
+            company_tokens.update(re.findall(r"[a-z0-9]+", alias))
+    generic = {
+        "agenda", "company", "leadership", "meeting", "monthly", "pec", "prep",
+        "prepare", "review", "session", "team", "weekly",
+    }
+    topic_tokens = [token for token in tokens if token not in company_tokens | generic]
+    if "management" in topic_tokens and "project" in topic_tokens:
+        topic_tokens.append("pm")
+    return " ".join(dict.fromkeys(topic_tokens))
+
+
 def _company_mentions(text: str, alias: str) -> list[re.Match[str]]:
     return list(re.finditer(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE))
 
@@ -864,34 +880,42 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     meeting_title = payload.meeting or "Executive meeting"
     company_name = _company_in_query(meeting_title)
     company = db.query(Company).filter(Company.name.ilike(company_name)).first() if company_name else None
+    topic_query = _meeting_topic_query(meeting_title, company_name) if company_name else ""
+    context_query = topic_query or meeting_title
 
     def scoped_items(model: type[Any]) -> list[Any]:
         items = db.query(model).all()
         return [item for item in items if _belongs_to_company(item, company_name)] if company_name else items
 
-    issues = _rank_for_context(scoped_items(StrategicIssue), SEARCH_CONFIG[StrategicIssue][1], meeting_title)
-    decisions = _rank_for_context(scoped_items(Decision), SEARCH_CONFIG[Decision][1], meeting_title)
-    people = _rank_for_context(scoped_items(Person), SEARCH_CONFIG[Person][1], meeting_title)
-    meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], meeting_title)[:5]
-    metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], meeting_title)
-    projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], meeting_title)
+    issues = _rank_for_context(scoped_items(StrategicIssue), SEARCH_CONFIG[StrategicIssue][1], context_query)
+    decisions = _rank_for_context(scoped_items(Decision), SEARCH_CONFIG[Decision][1], context_query)
+    people = _rank_for_context(scoped_items(Person), SEARCH_CONFIG[Person][1], context_query)
+    meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], context_query)[:5]
+    metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], context_query)
+    projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], context_query)
     capture_candidates = scoped_items(CaptureRecord)
-    minimum_capture_score = 1 if company_name else 6
+    minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
     captures = _unique_captures([
-        capture for capture in _rank_for_context(capture_candidates, ["raw_text"], meeting_title)
-        if _match_score(capture, ["raw_text"], meeting_title) >= minimum_capture_score
+        capture for capture in _rank_for_context(capture_candidates, ["raw_text"], context_query)
+        if _match_score(capture, ["raw_text"], context_query) >= minimum_capture_score
     ])
     capture_people = [
         person.name
         for person in db.query(Person).all()
         if any(re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE) for capture in captures)
     ]
-    action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
-    risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
-    supplemental_people = list(company.people or [] if company else [])
-    supplemental_issues = list(company.strategic_issues or [] if company else [])
-    supplemental_projects = list(company.projects or [] if company else [])
-    supplemental_decisions = list(company.decisions or [] if company else [])
+    action_items = list(dict.fromkeys(item for meeting in meetings for item in (meeting.action_items or [])))
+    risks = list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
+
+    def topical(labels: list[str]) -> list[str]:
+        if not topic_query:
+            return labels
+        return [label for label in labels if _match_score(type("Label", (), {"value": label})(), ["value"], topic_query)]
+
+    supplemental_people = topical(list(company.people or [] if company else []))
+    supplemental_issues = topical(list(company.strategic_issues or [] if company else []))
+    supplemental_projects = topical(list(company.projects or [] if company else []))
+    supplemental_decisions = topical(list(company.decisions or [] if company else []))
     related_people = _merge_memory_labels(
         [person.name for person in people] + capture_people, supplemental_people, company_name
     )[:5]
@@ -899,7 +923,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     related_projects = _merge_memory_labels([project.title for project in projects], supplemental_projects, company_name)[:5]
     related_decisions = _merge_memory_labels([decision.title for decision in decisions], supplemental_decisions, company_name)[:5]
     metric_summaries = [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]]
-    metric_summaries = list(dict.fromkeys(metric_summaries + list(company.kpis or [] if company else [])))[:5]
+    metric_summaries = list(dict.fromkeys(metric_summaries + topical(list(company.kpis or [] if company else []))))[:5]
     agenda = [
         f"Review current context for {meeting_title}",
         f"Discuss open decisions: {', '.join(related_decisions[:2]) if related_decisions else 'No open decisions'}",

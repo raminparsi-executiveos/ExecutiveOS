@@ -108,3 +108,22 @@ def test_employment_transition_context_reaches_every_generated_output():
 
     morning = client.get('/briefing').json()
     assert any('Yeison is transitioning' in update for update in morning['recent_updates'])
+
+
+def test_company_meeting_prep_is_driven_by_the_requested_topic():
+    pm = client.post('/meeting-prep', json={'meeting': 'PEC PM meeting'}).json()
+    sales = client.post('/meeting-prep', json={'meeting': 'PEC sales meeting'}).json()
+
+    assert 'Improve PM quality' in pm['related_strategic_issues']
+    assert 'Increase PEC sales' not in pm['related_strategic_issues']
+    assert 'PM Quality Initiative' in pm['related_projects']
+    assert 'PM quality score' in pm['metrics']
+    assert 'Sales pipeline' not in pm['metrics']
+
+    assert 'Increase PEC sales' in sales['related_strategic_issues']
+    assert 'Improve PM quality' not in sales['related_strategic_issues']
+    assert 'Sales pipeline' in sales['metrics']
+    assert 'PM quality score' not in sales['metrics']
+
+    assert pm['related_strategic_issues'] != sales['related_strategic_issues']
+    assert pm['metrics'] != sales['metrics']

@@ -36,6 +36,9 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Surface recent confirmed captures in morning briefing, meeting prep, and search.
 - [x] Include people mentioned in matched capture context even when their primary company has changed.
 - [x] Keep an approved new primary company authoritative when transition text also mentions PEC.
+- [x] Rank meeting context by topic within a company, so PEC PM and PEC sales prep diverge.
+- [x] Filter company-index projects, issues, decisions, people, KPIs, and captures to the meeting topic.
+- [x] Deduplicate repeated risks and action items in meeting prep.
 
 ## Sample acceptance scenarios
 
