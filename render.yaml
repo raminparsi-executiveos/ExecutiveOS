@@ -7,15 +7,13 @@ services:
     branch: main
     buildCommand: |
       bash -lc 'set -x
-      python -m venv .venv
-      . .venv/bin/activate
       python -m pip install --upgrade pip setuptools wheel
       # install deps with rust toolchain in /tmp if needed
       export CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup PATH=/tmp/cargo/bin:/tmp/rustup/bin:/usr/bin:/bin
       curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path || true
       . /tmp/cargo/env || true
       PATH=/tmp/cargo/bin:/tmp/rustup/bin:$PATH python -m pip install -r requirements.txt'
-    startCommand: .venv/bin/gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
+    startCommand: python -m gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
     root: backend
 
   - type: static_site
