@@ -107,6 +107,20 @@ def test_saved_memory_feeds_briefing_prep_and_search():
     assert history['items'][0]['saved_count'] >= 1
 
 
+def test_meeting_prep_does_not_include_unrelated_company_memory():
+    prep = client.post('/meeting-prep', json={'meeting': 'RYSE leadership meeting'}).json()
+    assert 'Julio promotion and pay increase' not in prep['open_decisions']
+    assert 'Improve PM quality' not in prep['related_strategic_issues']
+
+
+def test_unknown_meeting_context_returns_clean_empty_sections():
+    prep = client.post('/meeting-prep', json={'meeting': 'Completely New Topic'}).json()
+    assert prep['related_people'] == []
+    assert prep['related_strategic_issues'] == []
+    assert prep['related_projects'] == []
+    assert prep['open_decisions'] == []
+
+
 def test_capture_confirmation_rolls_back_partial_updates(monkeypatch):
     company_name = 'Atomic Rollback Company'
 

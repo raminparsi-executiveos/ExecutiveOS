@@ -41,9 +41,9 @@ let active = 'capture';
 let briefing = null;
 let meetingPrep = null;
 let searchResults = null;
-let captureText = 'Julio is now responsible for PM quality and high-priority clients. His pay is increasing from $14.42/hr to $17.50/hr.';
-let searchQuery = 'Why did we promote Julio?';
-let meetingQuery = 'RYSE leadership meeting';
+let captureText = '';
+let searchQuery = '';
+let meetingQuery = '';
 let captureResult = null;
 let classificationResult = null;
 let selectedUpdateIndices = [];
@@ -116,6 +116,12 @@ function render() {
       textarea.value = captureText;
       textarea.addEventListener('input', (event) => {
         captureText = event.target.value;
+        if (classificationResult) {
+          classificationResult = null;
+          selectedUpdateIndices = [];
+          app.querySelector('#classification-review')?.remove();
+        }
+        captureResult = null;
       });
     }
     if (button) {
@@ -163,6 +169,9 @@ function render() {
           briefing = null;
           meetingPrep = null;
           searchResults = null;
+          classificationResult = null;
+          selectedUpdateIndices = [];
+          captureText = '';
           apiError = null;
         } catch (error) {
           setApiError(error.message);
@@ -183,6 +192,7 @@ function render() {
         } else {
           selectedUpdateIndices = selectedUpdateIndices.filter((value) => value !== index);
         }
+        render();
       });
     });
   }
@@ -217,6 +227,9 @@ function render() {
         render();
       });
     }
+    input?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') button?.click();
+    });
   }
 
   if (active === 'search') {
@@ -248,6 +261,9 @@ function render() {
         render();
       });
     }
+    input?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') button?.click();
+    });
   }
 }
 
@@ -347,24 +363,24 @@ function renderPanel() {
       <h2>Capture</h2>
       <p>Enter natural language, review the suggested updates, and approve the ones that should be saved.</p>
       <label for="capture-input" class="sr-only">Executive update</label>
-      <textarea id="capture-input" rows="6"></textarea>
+      <textarea id="capture-input" rows="6" placeholder="Example: Morgan owns the Zephyr expansion. The main risk is distributor capacity."></textarea>
       <button id="capture-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Working…' : 'Classify and review updates'}</button>
       ${classificationResult ? `
-        <div style="margin-top: 12px;">
+        <div id="classification-review" style="margin-top: 12px;">
           <div class="section-heading">
             <h3>Suggested updates</h3>
             <span class="badge">${classificationResult.classification_source === 'ai' ? 'AI organized' : 'Local preview'}</span>
           </div>
-          ${classificationResult.suggested_updates.map((item, index) => `
+          ${classificationResult.suggested_updates.length ? classificationResult.suggested_updates.map((item, index) => `
             <label class="suggestion">
               <input class="approval-toggle" type="checkbox" data-index="${index}" ${selectedUpdateIndices.includes(index) ? 'checked' : ''} />
               <span><strong>${escapeHtml(humanize(item.type))}</strong> — ${escapeHtml(item.name || item.title || item.details || 'Update')}
               ${item.company ? `<small>Company: ${escapeHtml(item.company)}</small>` : ''}
               ${item.details ? `<small>${escapeHtml(item.details)}</small>` : ''}</span>
             </label>
-          `).join('')}
+          `).join('') : '<p class="muted">No reliable structured updates were found. Add a person, company, project, decision, or metric and try again.</p>'}
           ${classificationResult.follow_ups?.length ? `<div class="follow-ups"><strong>Useful follow-up</strong>${renderList(classificationResult.follow_ups)}</div>` : ''}
-          <button id="capture-confirm" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Save approved updates'}</button>
+          ${classificationResult.suggested_updates.length ? `<button id="capture-confirm" style="margin-top: 12px;" ${submitting || selectedUpdateIndices.length === 0 ? 'disabled' : ''}>${submitting ? 'Saving…' : `Save ${selectedUpdateIndices.length} approved update${selectedUpdateIndices.length === 1 ? '' : 's'}`}</button>` : ''}
         </div>
       ` : ''}
       ${captureResult ? `<p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>` : ''}
@@ -405,7 +421,7 @@ function renderPanel() {
       <h2>Meeting Prep</h2>
       <p>Generate a meeting agenda from recent summaries, open decisions, people, and strategic issues.</p>
       <label for="prep-input" class="sr-only">Meeting name or context</label>
-      <input id="prep-input" />
+      <input id="prep-input" placeholder="Example: RYSE leadership meeting" />
       <button id="prep-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Preparing…' : 'Prepare meeting'}</button>
       ${meetingPrep ? `
         <div class="output">
@@ -428,7 +444,7 @@ function renderPanel() {
   return `
     <h2>Search / Ask</h2>
     <label for="search-input" class="sr-only">Question about executive memory</label>
-    <input id="search-input" placeholder="Why did we promote Julio?" />
+    <input id="search-input" placeholder="Example: Why did we promote Julio?" />
     <button id="search-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Searching…' : 'Ask ExecutiveOS'}</button>
     ${searchResults ? `<div class="results"><aside class="focus"><strong>ExecutiveOS answer</strong><p>${escapeHtml(searchResults.answer || 'No matching executive memory found.')}</p></aside>${searchResults.results.length ? searchResults.results.map((result) => `
       <article><span class="badge">${escapeHtml(humanize(result.type))}</span><h3>${escapeHtml(result.title)}</h3><p>${escapeHtml(result.summary)}</p></article>

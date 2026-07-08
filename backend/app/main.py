@@ -171,10 +171,12 @@ RESULT_TYPES = {
 }
 
 
-def _rank_for_context(items: list[Any], fields: list[str], query: str) -> list[Any]:
+def _rank_for_context(
+    items: list[Any], fields: list[str], query: str, *, include_unmatched: bool = False
+) -> list[Any]:
     scored = [(_match_score(item, fields, query), item.id or 0, item) for item in items]
     relevant = [entry for entry in scored if entry[0] > 0]
-    pool = relevant or scored
+    pool = relevant or (scored if include_unmatched else [])
     return [entry[2] for entry in sorted(pool, key=lambda entry: (entry[0], entry[1]), reverse=True)]
 
 
