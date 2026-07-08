@@ -1,19 +1,10 @@
 services:
   - type: web_service
     name: executiveos-backend
-    env: python
-    runtime: python-3.13
+    env: docker
     plan: free
     branch: main
-    buildCommand: |
-      bash -lc 'set -x
-      python -m pip install --upgrade pip setuptools wheel
-      # install deps with rust toolchain in /tmp if needed
-      export CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup PATH=/tmp/cargo/bin:/tmp/rustup/bin:/usr/bin:/bin
-      curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path || true
-      . /tmp/cargo/env || true
-      PATH=/tmp/cargo/bin:/tmp/rustup/bin:$PATH python -m pip install -r requirements.txt'
-    startCommand: python -m gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
+    dockerfilePath: Dockerfile
     root: backend
 
   - type: static_site
