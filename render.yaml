@@ -5,7 +5,7 @@ services:
     runtime: python-3.13
     plan: free
     branch: main
-    buildCommand: CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH=/tmp/cargo/bin:/tmp/rustup/bin:$PATH && rustup default stable && python -m pip install --upgrade pip setuptools wheel && CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup PATH=/tmp/cargo/bin:/tmp/rustup/bin:$PATH pip install -r requirements.txt
+    buildCommand: CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . /tmp/cargo/env && rustup toolchain install stable && rustup default stable && python -m pip install --upgrade pip setuptools wheel && CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup PATH=/tmp/cargo/bin:/tmp/rustup/bin:$PATH pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     root: backend
 
