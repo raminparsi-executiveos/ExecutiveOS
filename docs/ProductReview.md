@@ -25,6 +25,12 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Deduplicate shorthand company-index labels against richer normalized records.
 - [x] Clearly label a meeting agenda when no matching memory was found.
 - [x] Show decision reasoning, owners, roles, values, trends, and risks during capture approval.
+- [x] Stress-test 28 additional records across four companies and 33 varied search questions.
+- [x] Prevent generic meeting words from leaking other companies' actions into meeting prep.
+- [x] Return responsibilities, project next steps, decision review dates, and metric trends directly.
+- [x] Aggregate multi-record risks, decisions, action items, metrics, and open questions into useful answers.
+- [x] Support honest `today` and `overdue` queries without returning unrelated memory.
+- [x] Match conservative singular/plural variants such as `distributors` and `Distributor count`.
 
 ## Sample acceptance scenarios
 

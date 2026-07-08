@@ -116,7 +116,12 @@ def _match_score(record: Any, fields: list[str], query: str) -> int:
     }
     score = 0
     for token in tokens:
-        if token in haystack_tokens:
+        comparable_tokens = {token}
+        if token.endswith("ies") and len(token) > 3:
+            comparable_tokens.add(f"{token[:-3]}y")
+        elif token.endswith("s") and len(token) > 3:
+            comparable_tokens.add(token[:-1])
+        if comparable_tokens & haystack_tokens:
             score += 3
             continue
         for synonym in synonyms.get(token, []):
@@ -134,6 +139,12 @@ def _search_intent_boost(model: type[Any], query: str) -> int:
         return 8 if model is Meeting else 0
     if tokens & {"metric", "metrics", "kpi", "trend"}:
         return 8 if model is Metric else 0
+    if tokens & {"risk", "risks"}:
+        return 12 if model in {StrategicIssue, Project} else 0
+    if tokens & {"action", "actions", "question", "questions"}:
+        return 12 if model is Meeting else 0
+    if "happening" in tokens:
+        return 20 if model is Company else 0
     if tokens & {"project", "projects", "initiative"}:
         return 8 if model is Project else 0
     if "role" in tokens or "person" in tokens:
@@ -235,17 +246,74 @@ def _answer_for_result(item: Any, query: str) -> str:
             return item.reasoning
         if tokens & {"when", "date"} and item.date:
             return item.date
+        if "review" in tokens and item.review_date:
+            return item.review_date
     if isinstance(item, Person):
         if "company" in tokens and item.company:
             return item.company
         if "role" in tokens and item.role:
             return item.role
+        if tokens & {"responsible", "responsibility", "responsibilities"} and item.responsibilities:
+            return "; ".join(item.responsibilities)
+        if tokens & {"working", "priority", "priorities"} and item.current_priorities:
+            return "; ".join(item.current_priorities)
+    if isinstance(item, Company) and "happening" in tokens:
+        parts = []
+        if item.strategic_issues:
+            parts.append(f"Strategic issues: {', '.join(item.strategic_issues[:3])}")
+        if item.projects:
+            parts.append(f"Projects: {', '.join(item.projects[:3])}")
+        return ". ".join(parts) or _result_summary(item)
     if isinstance(item, (StrategicIssue, Project, SOP)) and tokens & {"who", "owner", "owns"}:
         if item.owner:
             return item.owner
     if isinstance(item, (StrategicIssue, Project)) and tokens & {"risk", "risks"} and item.risks:
         return "; ".join(item.risks)
+    if isinstance(item, Project) and ({"next", "step", "steps"} & tokens) and item.next_steps:
+        return "; ".join(item.next_steps)
+    if isinstance(item, Metric):
+        if tokens & {"trend", "trending"} and item.trend:
+            return item.trend
+        if tokens & {"up", "down"} and item.trend:
+            return f"{item.title}: {item.trend}"
+        return item.value or _result_summary(item)
+    if isinstance(item, Meeting):
+        if tokens & {"action", "actions", "item", "items"} and item.action_items:
+            return "; ".join(item.action_items)
+        if tokens & {"question", "questions"} and item.open_questions:
+            return "; ".join(item.open_questions)
     return _result_summary(item)
+
+
+def _answer_for_ranked_items(items: list[Any], query: str) -> str:
+    tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    if tokens & {"risk", "risks"}:
+        values = [risk for item in items if isinstance(item, (StrategicIssue, Project)) for risk in (item.risks or [])]
+        if values:
+            return "; ".join(dict.fromkeys(values))
+    if tokens & {"action", "actions"}:
+        values = [action for item in items if isinstance(item, Meeting) for action in (item.action_items or [])]
+        if values:
+            return "; ".join(dict.fromkeys(values))
+    if tokens & {"question", "questions"}:
+        values = [question for item in items if isinstance(item, Meeting) for question in (item.open_questions or [])]
+        if values:
+            return "; ".join(dict.fromkeys(values))
+    if "decisions" in tokens:
+        values = [
+            f"{item.title} (review {item.review_date})" if item.review_date else item.title
+            for item in items if isinstance(item, Decision)
+        ]
+        if values:
+            return "; ".join(values)
+    if tokens & {"metrics"} or tokens & {"up", "down"}:
+        values = [
+            f"{item.title}: {item.trend or item.value}"
+            for item in items if isinstance(item, Metric)
+        ]
+        if values:
+            return "; ".join(values)
+    return _answer_for_result(items[0], query)
 
 
 def _merge_memory_labels(primary: list[str], supplemental: list[str], company: str = "") -> list[str]:
@@ -743,12 +811,17 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     meeting_title = payload.meeting or "Executive meeting"
     company_name = _company_in_query(meeting_title)
     company = db.query(Company).filter(Company.name.ilike(company_name)).first() if company_name else None
-    issues = _rank_for_context(db.query(StrategicIssue).all(), SEARCH_CONFIG[StrategicIssue][1], meeting_title)
-    decisions = _rank_for_context(db.query(Decision).all(), SEARCH_CONFIG[Decision][1], meeting_title)
-    people = _rank_for_context(db.query(Person).all(), SEARCH_CONFIG[Person][1], meeting_title)
-    meetings = _rank_for_context(db.query(Meeting).all(), SEARCH_CONFIG[Meeting][1], meeting_title)[:5]
-    metrics = _rank_for_context(db.query(Metric).all(), SEARCH_CONFIG[Metric][1], meeting_title)
-    projects = _rank_for_context(db.query(Project).all(), SEARCH_CONFIG[Project][1], meeting_title)
+
+    def scoped_items(model: type[Any]) -> list[Any]:
+        items = db.query(model).all()
+        return [item for item in items if _belongs_to_company(item, company_name)] if company_name else items
+
+    issues = _rank_for_context(scoped_items(StrategicIssue), SEARCH_CONFIG[StrategicIssue][1], meeting_title)
+    decisions = _rank_for_context(scoped_items(Decision), SEARCH_CONFIG[Decision][1], meeting_title)
+    people = _rank_for_context(scoped_items(Person), SEARCH_CONFIG[Person][1], meeting_title)
+    meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], meeting_title)[:5]
+    metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], meeting_title)
+    projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], meeting_title)
     action_items = [item for meeting in meetings for item in (meeting.action_items or [])]
     risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
     supplemental_people = list(company.people or [] if company else [])
@@ -788,15 +861,41 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
     ranked_results = []
     query_tokens = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
     target_company = _company_in_query(payload.query)
+    risk_intent = bool(query_tokens & {"risk", "risks"})
+    action_intent = bool(query_tokens & {"action", "actions"})
+    question_intent = bool(query_tokens & {"question", "questions"})
+    quantity_intent = {"how", "many"} <= query_tokens
+    overdue_intent = "overdue" in query_tokens
+    meetings_today_intent = "today" in query_tokens and bool(query_tokens & {"meeting", "meetings"})
     for model, (title_field, fields) in SEARCH_CONFIG.items():
         for item in db.query(model).all():
             if target_company and not _belongs_to_company(item, target_company):
+                continue
+            if quantity_intent and model is not Metric:
+                continue
+            if risk_intent and (model not in {StrategicIssue, Project} or not item.risks):
+                continue
+            if action_intent and (model is not Meeting or not item.action_items):
+                continue
+            if question_intent and (model is not Meeting or not item.open_questions):
+                continue
+            if overdue_intent and (
+                model is not Decision or not item.review_date or item.review_date >= date.today().isoformat()
+            ):
+                continue
+            if meetings_today_intent and (model is not Meeting or item.date != date.today().isoformat()):
                 continue
             score = _match_score(item, fields, payload.query)
             intent_score = _search_intent_boost(model, payload.query)
             if not score and model is Decision and query_tokens & {"decision", "decisions"}:
                 score = intent_score
             if not score and model in {StrategicIssue, Project} and query_tokens & {"risk", "risks"} and item.risks:
+                score = 12
+            if not score and model is Meeting and (action_intent or question_intent):
+                score = 12
+            if not score and model is Decision and overdue_intent:
+                score = 12
+            if not score and model is Meeting and meetings_today_intent:
                 score = 12
             if score:
                 score += intent_score
@@ -815,5 +914,5 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
     cutoff = max(1, ranked_results[0][0] - 6)
     included = [entry for entry in ranked_results if entry[0] >= cutoff][:10]
     results = [entry[3] for entry in included]
-    answer = _answer_for_result(included[0][2], payload.query)
+    answer = _answer_for_ranked_items([entry[2] for entry in included], payload.query)
     return {"query": payload.query, "answer": answer, "results": results}
