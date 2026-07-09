@@ -117,7 +117,7 @@ def test_employment_transition_context_reaches_every_generated_output():
     assert any('15 hours per week' in context for context in prep['recent_capture_context'])
 
     morning = client.get('/briefing').json()
-    assert any('Yeison is transitioning' in update for update in morning['recent_updates'])
+    assert any('Yeison is transitioning' in update['label'] for update in morning['recent_updates'])
 
 
 def test_company_meeting_prep_is_driven_by_the_requested_topic():

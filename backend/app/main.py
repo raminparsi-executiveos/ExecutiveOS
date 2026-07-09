@@ -30,6 +30,7 @@ from .memory import (
     SEARCH_CONFIG,
     _answer_for_ranked_items,
     _belongs_to_company,
+    company_label_for_text,
     _company_in_query,
     _entity_name_boost,
     _match_score,
@@ -114,26 +115,55 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     decisions = db.query(Decision).order_by(Decision.id.desc()).all()
     meetings = db.query(Meeting).filter(Meeting.date == today).order_by(Meeting.id.desc()).all()
     projects = db.query(Project).order_by(Project.id.desc()).all()
-    risks = [risk for item in [*issues, *projects] for risk in (item.risks or [])]
-    waiting_on = [action for meeting in db.query(Meeting).all() for action in (meeting.action_items or [])]
+    risks = [
+        {"label": risk, "company": item.company or ""}
+        for item in [*issues, *projects]
+        for risk in (item.risks or [])
+    ]
+    waiting_on = [
+        {"label": action, "company": meeting.company or ""}
+        for meeting in db.query(Meeting).all()
+        for action in (meeting.action_items or [])
+    ]
     recent_captures = _unique_captures(
         db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
     )
-    priorities = list(dict.fromkeys(
-        [project.title for project in projects if project.status == "active"] + [issue.title for issue in issues]
-    ))
-    focus = priorities[0] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
+    priority_items = [
+        {"label": project.title, "company": project.company or ""}
+        for project in projects
+        if project.status == "active"
+    ] + [
+        {"label": issue.title, "company": issue.company or ""}
+        for issue in issues
+    ]
+    priorities = list({(item["label"], item["company"]): item for item in priority_items}.values())
+    focus = priorities[0]["label"] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
     return {
         "top_priorities": priorities[:3],
-        "strategic_issues": [issue.title for issue in issues[:3]],
-        "meetings_today": [meeting.title for meeting in meetings],
-        "open_decisions": list(dict.fromkeys(
-            decision.title for decision in decisions if not decision.review_date or decision.review_date >= today
-        ))[:3],
-        "people_needing_attention": [person.name for person in people if person.concerns][:3],
+        "strategic_issues": [
+            {"label": issue.title, "company": issue.company or ""}
+            for issue in issues[:3]
+        ],
+        "meetings_today": [
+            {"label": meeting.title, "company": meeting.company or ""}
+            for meeting in meetings
+        ],
+        "open_decisions": list({
+            (decision.title, decision.company or ""): {"label": decision.title, "company": decision.company or ""}
+            for decision in decisions
+            if not decision.review_date or decision.review_date >= today
+        }.values())[:3],
+        "people_needing_attention": [
+            {"label": person.name, "company": person.company or ""}
+            for person in people
+            if person.concerns
+        ][:3],
         "waiting_on_items": waiting_on[:5],
         "risks": risks[:5],
-        "recent_updates": [_result_summary(capture) for capture in recent_captures],
+        "recent_updates": [
+            {"label": _result_summary(capture), "company": company_label_for_text(capture.raw_text)}
+            for capture in recent_captures
+        ],
         "recommended_focus": f"Focus first on {focus}."
     }
 

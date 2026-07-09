@@ -48,6 +48,7 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Show useful API validation messages instead of a generic 422 error.
 - [x] Add API endpoints to update and delete stored memory objects.
 - [x] Add a Memory UI for browsing, editing, and deleting stored objects.
+- [x] Add company labels and color-coded chips to briefing lists.
 
 ## Sample acceptance scenarios
 

@@ -157,6 +157,56 @@ select {
   font-weight: 700;
 }
 
+.item-with-company {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.company-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 72px;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.company-pec {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.company-ryse {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.company-everpole {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.company-myndlog {
+  background: #fce7f3;
+  border-color: #f9a8d4;
+  color: #9d174d;
+}
+
+.company-unassigned {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
 .suggestion {
   display: flex;
   gap: 10px;

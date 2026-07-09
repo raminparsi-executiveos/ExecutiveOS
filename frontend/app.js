@@ -43,11 +43,32 @@ function escapeHtml(value) {
 
 function renderList(items, emptyMessage = 'Nothing needs attention right now.') {
   if (!items?.length) return `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+  return `<ul>${items.map((item) => `<li>${renderListItem(item)}</li>`).join('')}</ul>`;
 }
 
 function humanize(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function companyClass(company) {
+  const normalized = String(company || 'unassigned').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (normalized.includes('pec') || normalized.includes('pro-engineering')) return 'company-pec';
+  if (normalized.includes('ryse')) return 'company-ryse';
+  if (normalized.includes('everpole')) return 'company-everpole';
+  if (normalized.includes('myndlog')) return 'company-myndlog';
+  return 'company-unassigned';
+}
+
+function renderCompanyChip(company) {
+  if (!company) return '<span class="company-chip company-unassigned">Unassigned</span>';
+  return `<span class="company-chip ${companyClass(company)}">${escapeHtml(company)}</span>`;
+}
+
+function renderListItem(item) {
+  if (item && typeof item === 'object' && 'label' in item) {
+    return `<span class="item-with-company">${renderCompanyChip(item.company)}<span>${escapeHtml(item.label)}</span></span>`;
+  }
+  return escapeHtml(item);
 }
 
 function currentMemoryType() {

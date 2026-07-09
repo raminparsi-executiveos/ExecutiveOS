@@ -36,6 +36,7 @@ def test_briefing_and_meeting_prep_and_search_work():
     briefing = client.get('/briefing').json()
     assert 'top_priorities' in briefing
     assert len(briefing['top_priorities']) >= 3
+    assert {'label', 'company'} <= set(briefing['top_priorities'][0])
 
     prep = client.post('/meeting-prep', json={'meeting': 'RYSE leadership meeting'}).json()
     assert 'agenda' in prep

@@ -24,6 +24,7 @@ def test_briefing_endpoint():
     payload = response.json()
     assert 'top_priorities' in payload
     assert len(payload['top_priorities']) >= 3
+    assert {'label', 'company'} <= set(payload['top_priorities'][0])
 
 
 def test_empty_search_is_rejected():

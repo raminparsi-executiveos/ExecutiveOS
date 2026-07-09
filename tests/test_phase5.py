@@ -148,7 +148,7 @@ def test_saved_memory_feeds_briefing_prep_and_search():
     assert saved.json()['saved_count'] == 1
 
     briefing = client.get('/briefing').json()
-    assert 'Zephyr expansion' in briefing['top_priorities']
+    assert 'Zephyr expansion' in [item['label'] for item in briefing['top_priorities']]
 
     prep = client.post('/meeting-prep', json={'meeting': 'Zephyr leadership review'}).json()
     assert 'Zephyr expansion' in prep['related_projects']

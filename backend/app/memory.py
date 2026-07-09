@@ -192,6 +192,10 @@ def _company_in_query(query: str) -> str:
     return _detect_positive_company(query)
 
 
+def company_label_for_text(text: str) -> str:
+    return _detect_positive_company(text)
+
+
 def _belongs_to_company(item: Any, company: str) -> bool:
     if isinstance(item, Company):
         return item.name.lower() == company.lower()
@@ -349,5 +353,4 @@ def _company_is_explicitly_negated(text: str, company: str) -> bool:
     normalized = _normalize_company(company)
     aliases = [alias for alias, canonical in COMPANY_ALIASES.items() if canonical == normalized]
     return any(_mention_is_negated(text, match) for alias in aliases for match in _company_mentions(text, alias))
-
 
