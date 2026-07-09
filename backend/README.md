@@ -86,3 +86,5 @@ docker build -t executiveos-backend-dev -f backend/Dockerfile .
 ## Render
 
 The root `render.yaml` is the source of truth for deployment. It creates the backend service, frontend static site, and PostgreSQL database. Render injects `DATABASE_URL`; add `EXECUTIVEOS_PASSWORD` and `OPENAI_API_KEY` manually as secret environment variables.
+
+The Docker startup command runs `python -m app.migrate` before starting the API, so pending Alembic migrations are applied during deploy. Existing databases created before Alembic are stamped at the matching baseline and then upgraded.

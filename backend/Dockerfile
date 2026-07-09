@@ -28,9 +28,11 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 
 # Copy application code
 COPY backend /app
+COPY alembic.ini /alembic.ini
+COPY migrations /migrations
 
 # Expose port (Render will set $PORT at runtime)
 EXPOSE 8000
 
 # Run Gunicorn with Uvicorn workers; respect $PORT if provided
-CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:${PORT:-8000}"]
+CMD ["sh", "-c", "python -m app.migrate && gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:${PORT:-8000}"]

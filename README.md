@@ -146,3 +146,5 @@ The root `render.yaml` provisions:
 - `executiveos-db`: PostgreSQL database
 
 During Blueprint deployment, Render wires `DATABASE_URL` into the backend and `VITE_API_URL` into the frontend. Add `EXECUTIVEOS_PASSWORD` and `OPENAI_API_KEY` manually in Render's Environment page. Data stored in local SQLite is for development only and is not migrated to Render.
+
+The backend Docker container runs pending Alembic migrations before starting the API. Existing databases created before Alembic are stamped at the matching baseline and then upgraded.
