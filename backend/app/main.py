@@ -25,7 +25,7 @@ from .schemas import (
     UpdateObjectRequest,
 )
 from .seed import seed_data
-from .capture_service import _apply_approved_updates, _classify_capture_text
+from .capture_service import _apply_approved_updates, _classify_capture_text, capture_resolves_waiting_item
 from .memory import (
     SEARCH_CONFIG,
     _answer_for_ranked_items,
@@ -114,7 +114,27 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     people = db.query(Person).order_by(Person.id.desc()).all()
     decisions = db.query(Decision).order_by(Decision.id.desc()).all()
     meetings = db.query(Meeting).filter(Meeting.date == today).order_by(Meeting.id.desc()).all()
+    all_meetings = db.query(Meeting).all()
     projects = db.query(Project).order_by(Project.id.desc()).all()
+    recent_captures = _unique_captures(
+        db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
+    )
+    resolution_contexts = [capture.raw_text for capture in recent_captures]
+    resolution_contexts.extend(
+        " ".join([
+            person.name or "",
+            person.role or "",
+            person.company or "",
+            " ".join(person.responsibilities or []),
+            " ".join(person.current_priorities or []),
+            " ".join(person.performance_notes or []),
+        ])
+        for person in people
+    )
+
+    def action_is_resolved(action: str) -> bool:
+        return any(capture_resolves_waiting_item(context, action) for context in resolution_contexts)
+
     risks = [
         {"label": risk, "company": item.company or ""}
         for item in [*issues, *projects]
@@ -122,12 +142,10 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     ]
     waiting_on = [
         {"label": action, "company": meeting.company or ""}
-        for meeting in db.query(Meeting).all()
+        for meeting in all_meetings
         for action in (meeting.action_items or [])
+        if not action_is_resolved(action)
     ]
-    recent_captures = _unique_captures(
-        db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
-    )
     priority_items = [
         {"label": project.title, "company": project.company or ""}
         for project in projects

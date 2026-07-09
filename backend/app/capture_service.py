@@ -35,7 +35,7 @@ def _normalized_tokens(text: str) -> set[str]:
     return tokens
 
 
-def _capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
+def capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
     action_tokens = _normalized_tokens(action_item)
     if len(action_tokens) < 2:
         return False
@@ -49,7 +49,7 @@ def _resolve_waiting_items_from_capture(db: Session, text: str) -> None:
         action_items = list(meeting.action_items or [])
         unresolved = [
             item for item in action_items
-            if not _capture_resolves_waiting_item(text, item)
+            if not capture_resolves_waiting_item(text, item)
         ]
         if len(unresolved) != len(action_items):
             meeting.action_items = unresolved
@@ -372,4 +372,3 @@ def _apply_approved_updates(
         saved_count=len(approved_updates),
     ))
     db.commit()
-

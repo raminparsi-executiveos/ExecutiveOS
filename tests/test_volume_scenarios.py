@@ -152,6 +152,27 @@ def test_capture_resolves_matching_waiting_on_item():
     assert 'Ask Avery for ERP timeline' in after_waiting
 
 
+def test_briefing_hides_waiting_item_resolved_by_existing_memory():
+    create('meetings', {
+        'title': 'PEC staffing review',
+        'company': 'PEC',
+        'action_items': [
+            'Confirm Yeison working hours',
+            'Ask Avery for ERP timeline',
+        ],
+    })
+    create('people', {
+        'name': 'Yeison',
+        'company': 'PEC',
+        'current_priorities': ['Work 15 hours per week at PEC through September'],
+    })
+
+    briefing = client.get('/briefing').json()
+    waiting = [item['label'] for item in briefing['waiting_on_items']]
+    assert 'Confirm Yeison working hours' not in waiting
+    assert 'Ask Avery for ERP timeline' in waiting
+
+
 def test_company_meeting_prep_is_driven_by_the_requested_topic():
     pm = client.post('/meeting-prep', json={'meeting': 'PEC PM meeting'}).json()
     sales = client.post('/meeting-prep', json={'meeting': 'PEC sales meeting'}).json()
