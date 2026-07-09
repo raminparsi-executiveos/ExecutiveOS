@@ -120,6 +120,38 @@ def test_employment_transition_context_reaches_every_generated_output():
     assert any('Yeison is transitioning' in update['label'] for update in morning['recent_updates'])
 
 
+def test_capture_resolves_matching_waiting_on_item():
+    create('meetings', {
+        'title': 'PEC staffing review',
+        'company': 'PEC',
+        'action_items': [
+            'Confirm Yeison working hours',
+            'Ask Avery for ERP timeline',
+        ],
+    })
+
+    before = client.get('/briefing').json()
+    before_waiting = [item['label'] for item in before['waiting_on_items']]
+    assert 'Confirm Yeison working hours' in before_waiting
+
+    saved = client.post('/capture/confirm', json={
+        'text': 'Yeison will work 15 hours per week at PEC through September.',
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'person',
+            'name': 'Yeison',
+            'company': 'PEC',
+            'current_priorities': ['15 hours per week at PEC through September'],
+        }],
+    })
+    assert saved.status_code == 200
+
+    after = client.get('/briefing').json()
+    after_waiting = [item['label'] for item in after['waiting_on_items']]
+    assert 'Confirm Yeison working hours' not in after_waiting
+    assert 'Ask Avery for ERP timeline' in after_waiting
+
+
 def test_company_meeting_prep_is_driven_by_the_requested_topic():
     pm = client.post('/meeting-prep', json={'meeting': 'PEC PM meeting'}).json()
     sales = client.post('/meeting-prep', json={'meeting': 'PEC sales meeting'}).json()

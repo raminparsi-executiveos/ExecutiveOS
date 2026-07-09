@@ -12,6 +12,51 @@ from .memory import (
 )
 from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document
 
+
+WAITING_ITEM_STOP_WORDS = {
+    "a", "about", "an", "and", "are", "ask", "by", "check", "clarify",
+    "confirm", "determine", "find", "for", "from", "get", "her", "his",
+    "in", "is", "need", "needed", "of", "on", "out", "provide", "send",
+    "share", "the", "to", "update", "waiting", "what", "when", "with",
+}
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    tokens = set()
+    for token in re.findall(r"[a-z0-9]+", text.lower()):
+        if token in WAITING_ITEM_STOP_WORDS:
+            continue
+        variants = {token}
+        if token.endswith("ing") and len(token) > 5:
+            variants.add(token[:-3])
+        if token.endswith("s") and len(token) > 3:
+            variants.add(token[:-1])
+        tokens.update(variants)
+    return tokens
+
+
+def _capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
+    action_tokens = _normalized_tokens(action_item)
+    if len(action_tokens) < 2:
+        return False
+    capture_tokens = _normalized_tokens(capture_text)
+    matched = action_tokens & capture_tokens
+    return action_tokens <= capture_tokens or len(matched) >= max(2, len(action_tokens) - 1)
+
+
+def _resolve_waiting_items_from_capture(db: Session, text: str) -> None:
+    for meeting in db.query(Meeting).all():
+        action_items = list(meeting.action_items or [])
+        unresolved = [
+            item for item in action_items
+            if not _capture_resolves_waiting_item(text, item)
+        ]
+        if len(unresolved) != len(action_items):
+            meeting.action_items = unresolved
+            db.add(meeting)
+            db.flush()
+
+
 def _upsert_company(db: Session, name: str) -> Company:
     company = db.query(Company).filter(Company.name.ilike(name)).first()
     if not company:
@@ -319,11 +364,12 @@ def _apply_approved_updates(
                     update = {**update, detail_field: update["details"]}
             _apply_generic_update(db, update)
 
+    _resolve_waiting_items_from_capture(db, text)
+
     db.add(CaptureRecord(
         raw_text=text,
         classification_source=classification_source,
         saved_count=len(approved_updates),
     ))
     db.commit()
-
 
