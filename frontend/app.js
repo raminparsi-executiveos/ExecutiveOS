@@ -71,6 +71,67 @@ function renderListItem(item) {
   return escapeHtml(item);
 }
 
+function itemCount(items) {
+  return Array.isArray(items) ? items.length : 0;
+}
+
+function renderPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothing found.') {
+  return `
+    <article class="prep-section prep-${tone}">
+      <div class="prep-section-heading">
+        <h4>${escapeHtml(title)}</h4>
+        <span class="count-pill">${itemCount(items)}</span>
+      </div>
+      ${renderList(items, emptyMessage)}
+    </article>
+  `;
+}
+
+function renderMeetingPrepOutput(prep) {
+  const contextCount = itemCount(prep.related_people) + itemCount(prep.related_strategic_issues)
+    + itemCount(prep.related_projects) + itemCount(prep.open_decisions)
+    + itemCount(prep.metrics) + itemCount(prep.risks);
+  return `
+    <div class="meeting-prep-output">
+      <header class="meeting-prep-header">
+        <div>
+          <h3>${escapeHtml(prep.meeting)}</h3>
+          ${prep.context_found === false ? '<p class="empty-notice" role="status">No matching executive memory was found. This agenda is a starting template; add more specific context or capture the meeting details first.</p>' : ''}
+        </div>
+        <div class="prep-stats" aria-label="Meeting prep summary">
+          <span><strong>${itemCount(prep.agenda)}</strong> agenda</span>
+          <span><strong>${contextCount}</strong> context</span>
+          <span><strong>${itemCount(prep.action_items)}</strong> actions</span>
+        </div>
+      </header>
+      <div class="prep-layout">
+        <section class="agenda-panel">
+          <div class="prep-section-heading">
+            <h4>Proposed agenda</h4>
+            <span class="count-pill">${itemCount(prep.agenda)}</span>
+          </div>
+          <ol>
+            ${(prep.agenda || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+          </ol>
+        </section>
+        <section class="prep-stack">
+          ${renderPrepSection('Action items', prep.action_items, 'action', 'No open action items.')}
+          ${renderPrepSection('Risks', prep.risks, 'risk', 'No risks found.')}
+          ${renderPrepSection('Open decisions', prep.open_decisions, 'decision', 'No open decisions.')}
+        </section>
+      </div>
+      <div class="prep-grid">
+        ${renderPrepSection('People', prep.related_people, 'people')}
+        ${renderPrepSection('Strategic issues', prep.related_strategic_issues, 'issue')}
+        ${renderPrepSection('Projects', prep.related_projects, 'project')}
+        ${renderPrepSection('Metrics', prep.metrics, 'metric')}
+        ${renderPrepSection('Recent meeting context', prep.recent_meeting_context, 'context')}
+        ${renderPrepSection('Recent captured updates', prep.recent_capture_context, 'context')}
+      </div>
+    </div>
+  `;
+}
+
 function currentMemoryType() {
   return memoryTypes.find((type) => type.key === memoryType) || memoryTypes[0];
 }
@@ -628,23 +689,7 @@ function renderPanel() {
       <label for="prep-input" class="sr-only">Meeting name or context</label>
       <input id="prep-input" placeholder="Example: RYSE leadership meeting" />
       <button id="prep-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Preparing…' : 'Prepare meeting'}</button>
-      ${meetingPrep ? `
-        <div class="output">
-          <h3>${escapeHtml(meetingPrep.meeting)}</h3>
-          ${meetingPrep.context_found === false ? '<p class="empty-notice" role="status">No matching executive memory was found. This agenda is a starting template; add more specific context or capture the meeting details first.</p>' : ''}
-          <h4>Proposed agenda</h4>${renderList(meetingPrep.agenda)}
-          <div class="briefing-grid">
-            <article><h4>People</h4>${renderList(meetingPrep.related_people)}</article>
-            <article><h4>Strategic issues</h4>${renderList(meetingPrep.related_strategic_issues)}</article>
-            <article><h4>Projects</h4>${renderList(meetingPrep.related_projects)}</article>
-            <article><h4>Open decisions</h4>${renderList(meetingPrep.open_decisions)}</article>
-            <article><h4>Recent context</h4>${renderList(meetingPrep.recent_meeting_context)}</article>
-            <article><h4>Recent captured updates</h4>${renderList(meetingPrep.recent_capture_context)}</article>
-            <article><h4>Action items</h4>${renderList(meetingPrep.action_items)}</article>
-            <article><h4>Metrics</h4>${renderList(meetingPrep.metrics)}</article>
-            <article><h4>Risks</h4>${renderList(meetingPrep.risks)}</article>
-          </div>
-        </div>` : ''}
+      ${meetingPrep ? renderMeetingPrepOutput(meetingPrep) : ''}
     `;
   }
 
