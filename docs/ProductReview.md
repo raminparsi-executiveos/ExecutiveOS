@@ -46,6 +46,8 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Keep screenshots optional and enable text-only Capture immediately as the user types.
 - [x] Accept the browser's explicit empty image field for text-only Capture.
 - [x] Show useful API validation messages instead of a generic 422 error.
+- [x] Add API endpoints to update and delete stored memory objects.
+- [x] Add a Memory UI for browsing, editing, and deleting stored objects.
 
 ## Sample acceptance scenarios
 

@@ -58,7 +58,7 @@ def test_ai_classification_handles_arbitrary_executive_memory(monkeypatch):
             follow_ups=['What date should the launch be reviewed?'],
         )
 
-    monkeypatch.setattr('app.main.analyze_capture', fake_analysis)
+    monkeypatch.setattr('app.capture_service.analyze_capture', fake_analysis)
     classified = client.post('/capture/classify', json={'text': 'Priya owns the Northstar launch.'})
     assert classified.status_code == 200
     payload = classified.json()
@@ -89,7 +89,7 @@ def test_screenshot_capture_uses_vision_and_keeps_review_flow(monkeypatch):
             )
         ])
 
-    monkeypatch.setattr('app.main.analyze_capture', fake_vision_analysis)
+    monkeypatch.setattr('app.capture_service.analyze_capture', fake_vision_analysis)
     response = client.post('/capture/classify', json={
         'text': 'Extract the revenue update from this dashboard.',
         'image_data': image_data,
@@ -107,7 +107,7 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
         'image_data': 'data:image/svg+xml;base64,PHN2Zz4=',
     }).status_code == 422
 
-    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory, image: None)
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory, image: None)
     unavailable = client.post('/capture/classify', json={
         'image_data': 'data:image/jpeg;base64,/9j/2Q==',
     })
@@ -118,7 +118,7 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
 
 
 def test_text_only_capture_accepts_explicit_empty_image_field(monkeypatch):
-    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory: CaptureAnalysis(
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory: CaptureAnalysis(
         suggested_updates=[SuggestedUpdate(type='person', name='Brandon', company='RYSE Wellness')]
     ))
     response = client.post('/capture/classify', json={
@@ -204,7 +204,7 @@ def test_search_answers_the_question_and_scopes_named_companies():
 
 
 def test_local_fallback_extracts_safe_common_updates(monkeypatch):
-    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory_context: None)
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
 
     project = client.post('/capture/classify', json={
         'text': 'Morgan owns the Zephyr expansion. The main risk is distributor capacity.'
@@ -244,7 +244,7 @@ def test_capture_confirmation_rolls_back_partial_updates(monkeypatch):
     def fail_generic_update(db, update):
         raise SQLAlchemyError('forced failure')
 
-    monkeypatch.setattr('app.main._apply_generic_update', fail_generic_update)
+    monkeypatch.setattr('app.capture_service._apply_generic_update', fail_generic_update)
     response = client.post(
         '/capture/confirm',
         json={
@@ -269,7 +269,7 @@ def test_company_correction_respects_negation_and_aliases(monkeypatch):
         },
     )
 
-    monkeypatch.setattr('app.main.analyze_capture', lambda text, memory_context: None)
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
     correction = 'Julio is with Pro Engineering, not RYSE.'
     classified = client.post('/capture/classify', json={'text': correction}).json()
     person_update = next(update for update in classified['suggested_updates'] if update['type'] == 'person')

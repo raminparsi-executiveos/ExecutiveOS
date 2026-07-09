@@ -12,6 +12,7 @@ ExecutiveOS helps leaders preserve important company context as structured memor
 - Generate a morning briefing from current memory.
 - Generate meeting prep from relevant company, project, people, decision, metric, meeting, and recent capture context.
 - Answer natural-language search questions with a direct answer and supporting records.
+- Browse, edit, and delete stored memory objects.
 - Support local development without an OpenAI key through a clearly labeled limited preview classifier.
 - Require authentication in hosted production.
 
@@ -32,6 +33,10 @@ The user enters a meeting name or context. The system returns a proposed agenda,
 ### Search / Ask
 
 The user asks a question about executive memory. The system returns a direct answer and ranked supporting records.
+
+### Memory
+
+The user browses stored memory by object type, opens a record, edits its fields, or deletes incorrect memory.
 
 ## Non-Goals
 

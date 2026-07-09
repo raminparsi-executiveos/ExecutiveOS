@@ -4,12 +4,13 @@ ExecutiveOS is an AI-first executive memory and decision platform for founders, 
 
 ## Current MVP
 
-The app ships four working workflows:
+The app ships five working workflows:
 
 1. **Capture**: enter natural language or attach a PNG, JPEG, or WebP screenshot, review suggested structured updates, and save only the approved items.
 2. **Morning Briefing**: review active priorities, strategic issues, meetings today, open decisions, risks, waiting-on items, and recent captures.
 3. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures.
 4. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
+5. **Memory**: browse stored objects, edit their fields, or delete incorrect records.
 
 ## Tech Stack
 
@@ -99,6 +100,8 @@ Important endpoints:
 - `GET /captures`
 - `GET /objects/{object_type}`
 - `POST /objects/{object_type}`
+- `PATCH /objects/{object_type}/{object_id}`
+- `DELETE /objects/{object_type}/{object_id}`
 - `POST /meeting-prep`
 - `POST /search`
 
@@ -110,6 +113,12 @@ Run backend tests:
 
 ```bash
 python -m pytest -q
+```
+
+Apply database migrations:
+
+```bash
+alembic upgrade head
 ```
 
 Build the frontend:

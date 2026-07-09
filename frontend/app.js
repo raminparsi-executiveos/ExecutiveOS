@@ -3,6 +3,19 @@ const sections = [
   { key: 'briefing', label: 'Morning Briefing' },
   { key: 'prep', label: 'Meeting Prep' },
   { key: 'search', label: 'Search / Ask' },
+  { key: 'memory', label: 'Memory' },
+];
+
+const memoryTypes = [
+  { key: 'companies', label: 'Companies', titleField: 'name' },
+  { key: 'people', label: 'People', titleField: 'name' },
+  { key: 'strategic-issues', label: 'Strategic Issues', titleField: 'title' },
+  { key: 'projects', label: 'Projects', titleField: 'title' },
+  { key: 'decisions', label: 'Decisions', titleField: 'title' },
+  { key: 'meetings', label: 'Meetings', titleField: 'title' },
+  { key: 'sops', label: 'SOPs', titleField: 'title' },
+  { key: 'documents', label: 'Documents', titleField: 'title' },
+  { key: 'metrics', label: 'Metrics', titleField: 'title' },
 ];
 
 const app = document.getElementById('app');
@@ -37,6 +50,16 @@ function humanize(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function currentMemoryType() {
+  return memoryTypes.find((type) => type.key === memoryType) || memoryTypes[0];
+}
+
+function editableObjectAttributes(item) {
+  const attributes = { ...item };
+  delete attributes.id;
+  return attributes;
+}
+
 let active = 'capture';
 let briefing = null;
 let meetingPrep = null;
@@ -46,6 +69,11 @@ let screenshotData = '';
 let screenshotName = '';
 let searchQuery = '';
 let meetingQuery = '';
+let memoryType = 'people';
+let memoryObjects = null;
+let memoryLoading = false;
+let memoryEdit = null;
+let memoryMessage = '';
 let captureResult = null;
 let classificationResult = null;
 let selectedUpdateIndices = [];
@@ -87,6 +115,20 @@ async function safeJsonFetch(url, options) {
     throw new Error('The API returned an unexpected response');
   }
   return response.json();
+}
+
+async function loadMemoryObjects() {
+  memoryLoading = true;
+  memoryMessage = '';
+  try {
+    memoryObjects = await safeJsonFetch(apiUrl(`/objects/${memoryType}`));
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    memoryLoading = false;
+    render();
+  }
 }
 
 function render() {
@@ -311,6 +353,90 @@ function render() {
       if (event.key === 'Enter') button?.click();
     });
   }
+
+  if (active === 'memory') {
+    const select = app.querySelector('#memory-type');
+    select?.addEventListener('change', () => {
+      memoryType = select.value;
+      memoryObjects = null;
+      memoryEdit = null;
+      memoryMessage = '';
+      render();
+    });
+
+    app.querySelectorAll('[data-edit-object]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = Number(button.getAttribute('data-edit-object'));
+        const item = (memoryObjects?.items || []).find((candidate) => candidate.id === id);
+        if (!item) return;
+        memoryEdit = {
+          id,
+          title: item[currentMemoryType().titleField] || `${currentMemoryType().label} #${id}`,
+          text: JSON.stringify(editableObjectAttributes(item), null, 2),
+        };
+        memoryMessage = '';
+        render();
+      });
+    });
+
+    app.querySelector('#memory-cancel')?.addEventListener('click', () => {
+      memoryEdit = null;
+      memoryMessage = '';
+      render();
+    });
+
+    app.querySelector('#memory-save')?.addEventListener('click', async () => {
+      if (!memoryEdit || submitting) return;
+      let attributes = {};
+      try {
+        attributes = JSON.parse(app.querySelector('#memory-editor')?.value || '{}');
+      } catch {
+        memoryMessage = 'Enter valid JSON before saving.';
+        render();
+        return;
+      }
+      submitting = true;
+      render();
+      try {
+        await safeJsonFetch(apiUrl(`/objects/${memoryType}/${memoryEdit.id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attributes }),
+        });
+        memoryEdit = null;
+        memoryObjects = null;
+        memoryMessage = 'Memory object updated.';
+        briefing = null;
+        meetingPrep = null;
+        searchResults = null;
+      } catch (error) {
+        setApiError(error.message);
+      } finally {
+        submitting = false;
+      }
+      render();
+    });
+
+    app.querySelector('#memory-delete')?.addEventListener('click', async () => {
+      if (!memoryEdit || submitting) return;
+      submitting = true;
+      render();
+      try {
+        await safeJsonFetch(apiUrl(`/objects/${memoryType}/${memoryEdit.id}`), { method: 'DELETE' });
+        memoryEdit = null;
+        memoryObjects = null;
+        memoryMessage = 'Memory object deleted.';
+        briefing = null;
+        meetingPrep = null;
+        searchResults = null;
+      } catch (error) {
+        setApiError(error.message);
+      } finally {
+        submitting = false;
+      }
+      render();
+    });
+  }
 }
 
 function renderAuthentication() {
@@ -498,6 +624,52 @@ function renderPanel() {
             <article><h4>Risks</h4>${renderList(meetingPrep.risks)}</article>
           </div>
         </div>` : ''}
+    `;
+  }
+
+  if (active === 'memory') {
+    const selectedType = currentMemoryType();
+    if (!memoryObjects && !memoryLoading) {
+      loadMemoryObjects();
+    }
+
+    return `
+      <h2>Memory</h2>
+      <div class="toolbar">
+        <label for="memory-type">Object type</label>
+        <select id="memory-type">
+          ${memoryTypes.map((type) => `<option value="${type.key}" ${type.key === memoryType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`).join('')}
+        </select>
+      </div>
+      ${memoryMessage ? `<p class="success" role="status">${escapeHtml(memoryMessage)}</p>` : ''}
+      ${memoryLoading || !memoryObjects ? '<p>Loading memory…</p>' : `
+        <div class="memory-list">
+          ${memoryObjects.items.length ? memoryObjects.items.map((item) => `
+            <article>
+              <div>
+                <span class="badge">#${escapeHtml(item.id)}</span>
+                <h3>${escapeHtml(item[selectedType.titleField] || `${selectedType.label} memory`)}</h3>
+                <p>${escapeHtml(item.company || item.status || item.type || item.value || 'Stored memory object')}</p>
+              </div>
+              <button type="button" class="secondary" data-edit-object="${escapeHtml(item.id)}">Edit</button>
+            </article>
+          `).join('') : '<p class="muted">No objects found for this type.</p>'}
+        </div>
+      `}
+      ${memoryEdit ? `
+        <div class="editor-panel">
+          <div class="section-heading">
+            <h3>${escapeHtml(memoryEdit.title)}</h3>
+            <button id="memory-cancel" type="button" class="secondary">Close</button>
+          </div>
+          <label for="memory-editor" class="sr-only">Object attributes JSON</label>
+          <textarea id="memory-editor" rows="12">${escapeHtml(memoryEdit.text)}</textarea>
+          <div class="button-row">
+            <button id="memory-save" type="button" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Save changes'}</button>
+            <button id="memory-delete" type="button" class="danger" ${submitting ? 'disabled' : ''}>${submitting ? 'Deleting…' : 'Delete object'}</button>
+          </div>
+        </div>
+      ` : ''}
     `;
   }
 

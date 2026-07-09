@@ -37,10 +37,11 @@
 - Added Render Blueprint for backend, frontend, and PostgreSQL.
 - Added production authentication requirements.
 - Added operational response headers, health checks, and CORS configuration.
+- Added Alembic migration scaffolding and an initial schema migration.
 
 ## Next Candidates
 
-- Add migrations instead of relying on startup table creation.
+- Move hosted deployments fully onto explicit migration execution instead of startup table creation.
 - Add first-class object editing in the frontend.
 - Add import/export for memory backup.
 - Add richer linking between related objects.

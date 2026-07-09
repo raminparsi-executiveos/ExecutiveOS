@@ -5,7 +5,17 @@ from sqlalchemy import Column, DateTime, Integer, String, Text, JSON
 from .database import Base
 
 
-class Company(Base):
+class TimestampMixin:
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+
+class Company(TimestampMixin, Base):
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -20,7 +30,7 @@ class Company(Base):
     meetings = Column(JSON, default=list)
 
 
-class Person(Base):
+class Person(TimestampMixin, Base):
     __tablename__ = "people"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -37,7 +47,7 @@ class Person(Base):
     linked_meetings = Column(JSON, default=list)
 
 
-class StrategicIssue(Base):
+class StrategicIssue(TimestampMixin, Base):
     __tablename__ = "strategic_issues"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -52,7 +62,7 @@ class StrategicIssue(Base):
     linked_metrics = Column(JSON, default=list)
 
 
-class Project(Base):
+class Project(TimestampMixin, Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -68,7 +78,7 @@ class Project(Base):
     linked_decisions = Column(JSON, default=list)
 
 
-class Decision(Base):
+class Decision(TimestampMixin, Base):
     __tablename__ = "decisions"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -86,7 +96,7 @@ class Decision(Base):
     linked_strategic_issues = Column(JSON, default=list)
 
 
-class Meeting(Base):
+class Meeting(TimestampMixin, Base):
     __tablename__ = "meetings"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -103,7 +113,7 @@ class Meeting(Base):
     linked_strategic_issues = Column(JSON, default=list)
 
 
-class SOP(Base):
+class SOP(TimestampMixin, Base):
     __tablename__ = "sops"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -116,7 +126,7 @@ class SOP(Base):
     related_projects = Column(JSON, default=list)
 
 
-class Document(Base):
+class Document(TimestampMixin, Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -127,7 +137,7 @@ class Document(Base):
     linked_objects = Column(JSON, default=list)
 
 
-class Metric(Base):
+class Metric(TimestampMixin, Base):
     __tablename__ = "metrics"
 
     id = Column(Integer, primary_key=True, index=True)

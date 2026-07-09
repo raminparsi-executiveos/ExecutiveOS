@@ -22,6 +22,12 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/auth/status
 ```
 
+Apply schema migrations from the repository root:
+
+```bash
+alembic upgrade head
+```
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -50,6 +56,8 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `GET` | `/captures` | Lists confirmed capture records. |
 | `GET` | `/objects/{object_type}` | Lists stored objects. |
 | `POST` | `/objects/{object_type}` | Creates a stored object from validated attributes. |
+| `PATCH` | `/objects/{object_type}/{object_id}` | Updates validated fields on a stored object. |
+| `DELETE` | `/objects/{object_type}/{object_id}` | Deletes a stored object. |
 | `POST` | `/meeting-prep` | Generates agenda and context for a meeting. |
 | `POST` | `/search` | Answers a natural-language question over memory. |
 

@@ -19,6 +19,10 @@ class CreateObjectRequest(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class UpdateObjectRequest(BaseModel):
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
 

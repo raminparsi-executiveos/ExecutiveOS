@@ -59,6 +59,16 @@ def test_company_meeting_actions_and_search_stay_isolated():
 
 
 def test_plural_quantity_and_aggregate_questions():
+    create('meetings', {
+        'title': 'Volume PEC operating review', 'company': 'PEC',
+        'action_items': ['Avery: complete the volume ERP map'],
+        'open_questions': ['Should PEC accelerate volume hiring?'],
+    })
+    create('meetings', {
+        'title': 'Volume RYSE census review', 'company': 'RYSE Wellness',
+        'action_items': ['Sam: call volume referral partners'],
+        'open_questions': ['Can RYSE add volume weekend intake?'],
+    })
     create('metrics', {
         'title': 'Distributor count', 'company': 'EverPole', 'value': '17', 'trend': 'up 3',
     })
