@@ -28,8 +28,8 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 
 # Copy application code
 COPY backend /app
-COPY alembic.ini /alembic.ini
-COPY migrations /migrations
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
 
 # Expose port (Render will set $PORT at runtime)
 EXPOSE 8000

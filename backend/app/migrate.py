@@ -22,7 +22,12 @@ MEMORY_TABLES = {
 
 
 def alembic_config() -> Config:
-    config_path = Path(__file__).resolve().parents[2] / "alembic.ini"
+    candidates = [
+        Path(__file__).resolve().parents[1] / "alembic.ini",
+        Path(__file__).resolve().parents[2] / "alembic.ini",
+        Path("/alembic.ini"),
+    ]
+    config_path = next((path for path in candidates if path.exists()), candidates[0])
     return Config(str(config_path))
 
 
