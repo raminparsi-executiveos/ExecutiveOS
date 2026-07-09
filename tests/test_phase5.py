@@ -81,7 +81,7 @@ def test_screenshot_capture_uses_vision_and_keeps_review_flow(monkeypatch):
     def fake_vision_analysis(text, memory_context, supplied_image):
         assert text == 'Extract the revenue update from this dashboard.'
         assert 'Companies:' in memory_context
-        assert supplied_image == image_data
+        assert supplied_image == [image_data]
         return CaptureAnalysis(suggested_updates=[
             SuggestedUpdate(
                 type='metric', title='Screenshot revenue', company='PEC',
@@ -101,6 +101,31 @@ def test_screenshot_capture_uses_vision_and_keeps_review_flow(monkeypatch):
     assert payload['suggested_updates'][0]['value'] == '$3.1M'
 
 
+def test_multiple_screenshot_capture_uses_vision(monkeypatch):
+    images = [
+        'data:image/png;base64,iVBORw0KGgo=',
+        'data:image/jpeg;base64,/9j/2Q==',
+    ]
+
+    def fake_multi_image_analysis(text, memory_context, supplied_images):
+        assert text == 'Extract updates from these dashboards.'
+        assert 'Companies:' in memory_context
+        assert supplied_images == images
+        return CaptureAnalysis(suggested_updates=[
+            SuggestedUpdate(type='metric', title='Dashboard census', company='RYSE Wellness', value='18')
+        ])
+
+    monkeypatch.setattr('app.capture_service.analyze_capture', fake_multi_image_analysis)
+    response = client.post('/capture/classify', json={
+        'text': 'Extract updates from these dashboards.',
+        'image_data_list': images,
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['classification_source'] == 'ai'
+    assert payload['suggested_updates'][0]['title'] == 'Dashboard census'
+
+
 def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
     assert client.post('/capture/classify', json={'text': ''}).status_code == 422
     assert client.post('/capture/classify', json={
@@ -115,6 +140,11 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
     assert unavailable.json()['classification_source'] == 'image_unavailable'
     assert unavailable.json()['suggested_updates'] == []
     assert unavailable.json()['follow_ups']
+
+    too_many = client.post('/capture/classify', json={
+        'image_data_list': ['data:image/png;base64,iVBORw0KGgo='] * 6,
+    })
+    assert too_many.status_code == 422
 
 
 def test_text_only_capture_accepts_explicit_empty_image_field(monkeypatch):
@@ -174,6 +204,20 @@ def test_meeting_prep_does_not_include_unrelated_company_memory():
     assert 'Julio promotion and pay increase' in pec['open_decisions']
     assert 'Add weekend intake coverage' not in pec['open_decisions']
     assert 'Increase sales' not in pec['related_strategic_issues']
+
+
+def test_general_company_meeting_prep_includes_unresolved_older_context():
+    for index in range(7):
+        create_response = client.post('/objects/projects', json={'attributes': {
+            'title': f'PEC older active initiative {index}',
+            'company': 'PEC',
+            'status': 'active',
+            'objective': 'Still unresolved',
+        }})
+        assert create_response.status_code == 200
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC leadership review'}).json()
+    assert 'PEC older active initiative 0' in prep['related_projects']
 
 
 def test_unknown_meeting_context_returns_clean_empty_sections():

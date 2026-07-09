@@ -6,7 +6,7 @@ ExecutiveOS helps leaders preserve important company context as structured memor
 
 ## MVP Scope
 
-- Capture natural-language updates and screenshots.
+- Capture natural-language updates and one or more screenshots.
 - Suggest structured memory updates for user approval.
 - Store approved updates as durable executive objects.
 - Generate a morning briefing from current memory.
@@ -20,7 +20,7 @@ ExecutiveOS helps leaders preserve important company context as structured memor
 
 ### Capture
 
-The user enters text or attaches a screenshot. The system extracts supported facts into suggested updates, shows them for review, and saves only selected updates.
+The user enters text or attaches one or more screenshots. The system extracts supported facts into suggested updates, shows them for review, and saves only selected updates.
 
 ### Morning Briefing
 

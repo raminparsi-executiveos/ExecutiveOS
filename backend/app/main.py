@@ -157,10 +157,10 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     priorities = list({(item["label"], item["company"]): item for item in priority_items}.values())
     focus = priorities[0]["label"] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
     return {
-        "top_priorities": priorities[:3],
+        "top_priorities": priorities[:8],
         "strategic_issues": [
             {"label": issue.title, "company": issue.company or ""}
-            for issue in issues[:3]
+            for issue in issues[:8]
         ],
         "meetings_today": [
             {"label": meeting.title, "company": meeting.company or ""}
@@ -170,14 +170,14 @@ def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
             (decision.title, decision.company or ""): {"label": decision.title, "company": decision.company or ""}
             for decision in decisions
             if not decision.review_date or decision.review_date >= today
-        }.values())[:3],
+        }.values())[:8],
         "people_needing_attention": [
             {"label": person.name, "company": person.company or ""}
             for person in people
             if person.concerns
-        ][:3],
-        "waiting_on_items": waiting_on[:5],
-        "risks": risks[:5],
+        ][:5],
+        "waiting_on_items": waiting_on[:8],
+        "risks": risks[:8],
         "recent_updates": [
             {"label": _result_summary(capture), "company": company_label_for_text(capture.raw_text)}
             for capture in recent_captures
@@ -206,7 +206,7 @@ def capture(payload: CaptureRequest, db: Session = Depends(get_db), _user: str =
 
 @app.post("/capture/classify")
 def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
-    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text, payload.image_data)
+    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text, payload.image_inputs())
     return {
         "message": "Classification complete",
         "suggested_updates": suggested_updates,
@@ -351,12 +351,13 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         items = db.query(model).all()
         return [item for item in items if _belongs_to_company(item, company_name)] if company_name else items
 
-    issues = _rank_for_context(scoped_items(StrategicIssue), SEARCH_CONFIG[StrategicIssue][1], context_query)
-    decisions = _rank_for_context(scoped_items(Decision), SEARCH_CONFIG[Decision][1], context_query)
-    people = _rank_for_context(scoped_items(Person), SEARCH_CONFIG[Person][1], context_query)
+    include_company_unmatched = bool(company_name and not topic_query)
+    issues = _rank_for_context(scoped_items(StrategicIssue), SEARCH_CONFIG[StrategicIssue][1], context_query, include_unmatched=include_company_unmatched)
+    decisions = _rank_for_context(scoped_items(Decision), SEARCH_CONFIG[Decision][1], context_query, include_unmatched=include_company_unmatched)
+    people = _rank_for_context(scoped_items(Person), SEARCH_CONFIG[Person][1], context_query, include_unmatched=include_company_unmatched)
     meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], context_query)[:5]
-    metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], context_query)
-    projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], context_query)
+    metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], context_query, include_unmatched=include_company_unmatched)
+    projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], context_query, include_unmatched=include_company_unmatched)
     capture_candidates = scoped_items(CaptureRecord)
     minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
     captures = _unique_captures([
@@ -382,12 +383,12 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     supplemental_decisions = topical(list(company.decisions or [] if company else []))
     related_people = _merge_memory_labels(
         [person.name for person in people] + capture_people, supplemental_people, company_name
-    )[:5]
-    related_issues = _merge_memory_labels([issue.title for issue in issues], supplemental_issues, company_name)[:5]
-    related_projects = _merge_memory_labels([project.title for project in projects], supplemental_projects, company_name)[:5]
-    related_decisions = _merge_memory_labels([decision.title for decision in decisions], supplemental_decisions, company_name)[:5]
-    metric_summaries = [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:5]]
-    metric_summaries = list(dict.fromkeys(metric_summaries + topical(list(company.kpis or [] if company else []))))[:5]
+    )[:8]
+    related_issues = _merge_memory_labels([issue.title for issue in issues], supplemental_issues, company_name)[:8]
+    related_projects = _merge_memory_labels([project.title for project in projects], supplemental_projects, company_name)[:8]
+    related_decisions = _merge_memory_labels([decision.title for decision in decisions], supplemental_decisions, company_name)[:8]
+    metric_summaries = [f"{metric.title}: {metric.value} ({metric.trend})" for metric in metrics[:8]]
+    metric_summaries = list(dict.fromkeys(metric_summaries + topical(list(company.kpis or [] if company else []))))[:8]
     agenda = [
         f"Review current context for {meeting_title}",
         f"Discuss open decisions: {', '.join(related_decisions[:2]) if related_decisions else 'No open decisions'}",

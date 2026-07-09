@@ -1,8 +1,17 @@
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from .ai import SuggestedUpdate
+
+
+ImageData = Annotated[
+    str,
+    Field(
+        max_length=7_000_000,
+        pattern=r"^data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$",
+    ),
+]
 
 
 class CaptureRequest(BaseModel):
@@ -38,13 +47,20 @@ class CaptureClassificationRequest(BaseModel):
         max_length=7_000_000,
         pattern=r"^(?:|data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+)$",
     )
+    image_data_list: list[ImageData] = Field(default_factory=list, max_length=5)
     confirm: bool = False
 
     @model_validator(mode="after")
     def require_capture_input(self):
-        if not self.text.strip() and not self.image_data:
+        if not self.text.strip() and not self.image_inputs():
             raise ValueError("Enter text or attach a screenshot")
         return self
+
+    def image_inputs(self) -> list[str]:
+        images = list(self.image_data_list)
+        if self.image_data:
+            images.insert(0, self.image_data)
+        return list(dict.fromkeys(images))
 
 
 class CaptureConfirmationRequest(BaseModel):

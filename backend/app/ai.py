@@ -73,7 +73,7 @@ fields because details may be used only as supporting context.
 """
 
 
-def analyze_capture(text: str, memory_context: str, image_data: str = "") -> CaptureAnalysis | None:
+def analyze_capture(text: str, memory_context: str, image_data: str | list[str] = "") -> CaptureAnalysis | None:
     """Return structured AI extraction, or None when AI is not configured/available."""
     if not os.getenv("OPENAI_API_KEY"):
         return None
@@ -86,8 +86,9 @@ def analyze_capture(text: str, memory_context: str, image_data: str = "") -> Cap
             "type": "input_text",
             "text": f"Known memory:\n{memory_context}\n\nCapture context:\n{capture_prompt}",
         }]
-        if image_data:
-            user_content.append({"type": "input_image", "image_url": image_data})
+        image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
+        for image in image_inputs:
+            user_content.append({"type": "input_image", "image_url": image})
 
         response = OpenAI(timeout=20.0, max_retries=1).responses.parse(
             model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),

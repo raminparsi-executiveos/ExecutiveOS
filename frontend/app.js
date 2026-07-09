@@ -147,8 +147,7 @@ let briefing = null;
 let meetingPrep = null;
 let searchResults = null;
 let captureText = '';
-let screenshotData = '';
-let screenshotName = '';
+let screenshots = [];
 let searchQuery = '';
 let meetingQuery = '';
 let memoryType = 'people';
@@ -250,8 +249,8 @@ function render() {
       textarea.addEventListener('input', (event) => {
         captureText = event.target.value;
         if (button) {
-          button.disabled = submitting || (!captureText.trim() && !screenshotData);
-          button.textContent = screenshotData ? 'Analyze and review screenshot' : 'Classify and review updates';
+          button.disabled = submitting || (!captureText.trim() && !screenshots.length);
+          button.textContent = screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates';
         }
         if (classificationResult) {
           classificationResult = null;
@@ -262,46 +261,65 @@ function render() {
       });
     }
     screenshotInput?.addEventListener('change', (event) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-        setApiError('Use a PNG, JPEG, or WebP screenshot.');
+      const files = Array.from(event.target.files || []);
+      if (!files.length) return;
+      if (screenshots.length + files.length > 5) {
+        setApiError('Attach up to 5 screenshots.');
         return;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setApiError('Screenshot must be 5 MB or smaller.');
+      const invalid = files.find((file) => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type));
+      if (invalid) {
+        setApiError('Use PNG, JPEG, or WebP screenshots.');
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        screenshotData = String(reader.result || '');
-        screenshotName = file.name;
+      const oversized = files.find((file) => file.size > 5 * 1024 * 1024);
+      if (oversized) {
+        setApiError('Each screenshot must be 5 MB or smaller.');
+        return;
+      }
+      Promise.all(files.map((file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: String(reader.result || '') });
+        reader.onerror = () => reject(new Error('Screenshot could not be read.'));
+        reader.readAsDataURL(file);
+      }))).then((loadedScreenshots) => {
+        screenshots = [...screenshots, ...loadedScreenshots];
         classificationResult = null;
         selectedUpdateIndices = [];
         captureResult = null;
         apiError = null;
         render();
-      };
-      reader.onerror = () => setApiError('Screenshot could not be read.');
-      reader.readAsDataURL(file);
+      }).catch((error) => setApiError(error.message));
     });
-    app.querySelector('#screenshot-remove')?.addEventListener('click', () => {
-      screenshotData = '';
-      screenshotName = '';
+    app.querySelectorAll('[data-remove-screenshot]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const index = Number(button.getAttribute('data-remove-screenshot'));
+        screenshots = screenshots.filter((_, screenshotIndex) => screenshotIndex !== index);
+        classificationResult = null;
+        selectedUpdateIndices = [];
+        render();
+      });
+    });
+    app.querySelector('#screenshots-clear')?.addEventListener('click', () => {
+      screenshots = [];
       classificationResult = null;
       selectedUpdateIndices = [];
       render();
     });
     if (button) {
       button.addEventListener('click', async () => {
-        if ((!captureText.trim() && !screenshotData) || submitting) return;
+        if ((!captureText.trim() && !screenshots.length) || submitting) return;
         submitting = true;
         render();
         try {
           classificationResult = await safeJsonFetch(apiUrl('/capture/classify'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: captureText, image_data: screenshotData, confirm: true }),
+            body: JSON.stringify({
+              text: captureText,
+              image_data_list: screenshots.map((screenshot) => screenshot.data),
+              confirm: true,
+            }),
           });
           selectedUpdateIndices = (classificationResult.suggested_updates || []).map((_, index) => index);
           captureResult = null;
@@ -327,7 +345,7 @@ function render() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              text: captureText.trim() || `Screenshot capture: ${screenshotName}`,
+              text: captureText.trim() || `Screenshot capture: ${screenshots.map((screenshot) => screenshot.name).join(', ')}`,
               approved_updates: approvedUpdates,
               classification_source: classificationResult?.classification_source || 'unknown',
             }),
@@ -340,8 +358,7 @@ function render() {
           classificationResult = null;
           selectedUpdateIndices = [];
           captureText = '';
-          screenshotData = '';
-          screenshotName = '';
+          screenshots = [];
           apiError = null;
         } catch (error) {
           setApiError(error.message);
@@ -619,12 +636,14 @@ function renderPanel() {
       <label for="capture-input" class="sr-only">Executive update</label>
       <textarea id="capture-input" rows="6" placeholder="Example: Morgan owns the Zephyr expansion. The main risk is distributor capacity."></textarea>
       <div class="screenshot-controls">
-        <label class="file-button" for="screenshot-input">Attach screenshot</label>
-        <input id="screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" />
-        <span class="muted">PNG, JPEG, or WebP · 5 MB maximum</span>
+        <label class="file-button" for="screenshot-input">Attach screenshots</label>
+        <input id="screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+        <span class="muted">PNG, JPEG, or WebP · 5 MB each · 5 maximum</span>
       </div>
-      ${screenshotData ? `<div class="screenshot-preview"><img src="${screenshotData}" alt="Screenshot selected for capture" /><div><strong>${escapeHtml(screenshotName)}</strong><button id="screenshot-remove" type="button" class="secondary">Remove</button></div></div>` : ''}
-      <button id="capture-submit" style="margin-top: 12px;" ${submitting || (!captureText.trim() && !screenshotData) ? 'disabled' : ''}>${submitting ? 'Working…' : screenshotData ? 'Analyze and review screenshot' : 'Classify and review updates'}</button>
+      ${screenshots.length ? `<div class="screenshot-preview-grid">${screenshots.map((screenshot, index) => `
+        <div class="screenshot-preview"><img src="${screenshot.data}" alt="Screenshot ${index + 1} selected for capture" /><div><strong>${escapeHtml(screenshot.name)}</strong><button data-remove-screenshot="${index}" type="button" class="secondary">Remove</button></div></div>
+      `).join('')}<button id="screenshots-clear" type="button" class="secondary">Remove all</button></div>` : ''}
+      <button id="capture-submit" style="margin-top: 12px;" ${submitting || (!captureText.trim() && !screenshots.length) ? 'disabled' : ''}>${submitting ? 'Working…' : screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates'}</button>
       ${classificationResult ? `
         <div id="classification-review" style="margin-top: 12px;">
           <div class="section-heading">

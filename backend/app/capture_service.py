@@ -229,16 +229,17 @@ def _memory_context(db: Session) -> str:
 
 
 def _classify_capture_text(
-    db: Session, text: str, image_data: str = ""
+    db: Session, text: str, image_data: str | list[str] = ""
 ) -> tuple[list[dict[str, Any]], list[str], str]:
-    analysis = analyze_capture(text, _memory_context(db), image_data) if image_data else analyze_capture(text, _memory_context(db))
+    image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
+    analysis = analyze_capture(text, _memory_context(db), image_inputs) if image_inputs else analyze_capture(text, _memory_context(db))
     if analysis:
         return (
             [update.model_dump() for update in analysis.suggested_updates],
             analysis.follow_ups,
             "ai",
         )
-    if image_data:
+    if image_inputs:
         return [], ["Screenshot analysis requires a configured and available AI connection."], "image_unavailable"
     updates = _fallback_classify_capture_text(text)
     follow_ups = [] if updates else [

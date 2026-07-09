@@ -52,6 +52,8 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Resolve matching waiting-on items when Capture provides the missing information.
 - [x] Hide waiting-on items in Morning Briefing when existing memory already answers them.
 - [x] Reorganize Meeting Prep into agenda, action/risk/decision, and supporting-context sections.
+- [x] Include older unresolved priorities and active company context in Morning Briefing and Meeting Prep.
+- [x] Accept multiple screenshots in a single Capture classification request.
 
 ## Sample acceptance scenarios
 

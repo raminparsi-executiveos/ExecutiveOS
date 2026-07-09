@@ -51,7 +51,7 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `POST` | `/auth/login` | Issues a bearer token. |
 | `GET` | `/briefing` | Returns current executive briefing sections. |
 | `POST` | `/capture` | Classifies text and optionally saves suggested updates immediately. |
-| `POST` | `/capture/classify` | Classifies text and optional screenshot data for review. |
+| `POST` | `/capture/classify` | Classifies text and optional screenshot data for review. Supports `image_data` or up to 5 values in `image_data_list`. |
 | `POST` | `/capture/confirm` | Saves approved capture updates. |
 | `GET` | `/captures` | Lists confirmed capture records. |
 | `GET` | `/objects/{object_type}` | Lists stored objects. |
