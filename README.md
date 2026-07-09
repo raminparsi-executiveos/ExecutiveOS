@@ -1,35 +1,139 @@
 # ExecutiveOS
 
-ExecutiveOS is an AI-first operating system for founders, CEOs, and business owners.
+ExecutiveOS is an AI-first executive memory and decision platform for founders, CEOs, and business owners. It captures messy context, turns it into structured executive memory, and generates briefing, meeting-prep, and search answers from that memory.
 
-## Overview
+## Current MVP
 
-This MVP focuses on four screens:
+The app ships four working workflows:
 
-1. Capture
-2. Morning Briefing
-3. Meeting Prep
-4. Search / Ask
-
-The system stores executive memory as structured objects and generates outputs on demand.
+1. **Capture**: enter natural language or attach a PNG, JPEG, or WebP screenshot, review suggested structured updates, and save only the approved items.
+2. **Morning Briefing**: review active priorities, strategic issues, meetings today, open decisions, risks, waiting-on items, and recent captures.
+3. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures.
+4. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
 
 ## Tech Stack
 
-- Backend: FastAPI, SQLAlchemy, SQLite locally / PostgreSQL on Render
-- Frontend: React + Vite
-- AI: OpenAI API (optional in local development)
+- Backend: FastAPI, SQLAlchemy, Pydantic, SQLite locally, PostgreSQL on Render
+- Frontend: Vite static app
+- AI: OpenAI Responses API with structured output, optional in local development
+- Tests: pytest
+
+## Repository Layout
+
+```text
+backend/          FastAPI app, database models, auth, AI capture logic
+frontend/         Vite browser app
+docs/             Product, AI behavior, roadmap, and review docs
+tests/            API and workflow regression tests
+render.yaml       Render Blueprint for backend, frontend, and PostgreSQL
+Makefile          Common local commands
+```
 
 ## Getting Started
 
-- Backend: `cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && uvicorn app.main:app --reload`
-- Frontend: `cd frontend && npm install && npm run dev`
+### Backend
 
-Set `OPENAI_API_KEY` to enable AI classification. `OPENAI_MODEL` defaults to `gpt-5.4-mini`. Without a key, Capture uses a limited local preview classifier so development remains usable; production should configure the key.
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-Capture accepts text and PNG, JPEG, or WebP screenshots up to 5 MB. Screenshot extraction uses the configured vision-capable OpenAI model, returns structured suggestions for review, and does not store the image itself. Text-only capture retains its limited local fallback when AI is unavailable.
+The API runs at `http://127.0.0.1:8000`. Health check:
 
-Authentication is optional for local development and required on Render. Configure `EXECUTIVEOS_USERNAME` (defaults to `admin`), an `EXECUTIVEOS_PASSWORD` of at least 12 characters, and a random `SESSION_SECRET` of at least 32 characters. The Blueprint generates the session secret, but existing Render services require adding the password manually in the service's Environment page.
+```bash
+curl http://127.0.0.1:8000/health
+```
 
-## Render deployment
+Local data is stored in `backend/executiveos.db` unless `DATABASE_URL` is set.
 
-The root `render.yaml` provisions the API, static frontend, and PostgreSQL database. The frontend API URL and backend database URL are wired automatically during Blueprint deployment. Data stored in local SQLite is for development only and is not migrated to Render.
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend defaults to `http://127.0.0.1:8000` for API calls. Set `VITE_API_URL` when the backend is hosted elsewhere.
+
+## Configuration
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | No locally, yes on Render | Defaults to local SQLite. Render wires this to PostgreSQL. |
+| `OPENAI_API_KEY` | No | Enables AI capture classification and screenshot analysis. |
+| `OPENAI_MODEL` | No | Defaults to `gpt-5.4-mini`. Use a vision-capable model for screenshot capture. |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins. Defaults to `*`. |
+| `EXECUTIVEOS_USERNAME` | Production | Defaults to `admin`. |
+| `EXECUTIVEOS_PASSWORD` | Production | Required on Render; must be at least 12 characters. |
+| `SESSION_SECRET` | Production | Required when auth is enabled; must be at least 32 characters. |
+
+Authentication is optional for local development unless `EXECUTIVEOS_PASSWORD` is set. Render sets `RENDER=true`, so authentication is required there. The Blueprint generates `SESSION_SECRET`, but `EXECUTIVEOS_PASSWORD` must be added manually as a secret environment variable.
+
+## Capture Behavior
+
+Capture uses OpenAI structured output when `OPENAI_API_KEY` is configured. Suggested updates are not saved until the user approves them. Screenshots are analyzed through the same review workflow and are not stored as images.
+
+Without an OpenAI key, text capture still works through a visibly labeled local preview classifier. Screenshot classification requires a configured AI connection.
+
+Capture accepts:
+
+- Text up to 20,000 characters
+- PNG, JPEG, or WebP screenshots up to 5 MB
+- Up to 50 approved updates per confirmation
+
+## API Overview
+
+Important endpoints:
+
+- `GET /health`
+- `GET /auth/status`
+- `POST /auth/login`
+- `GET /briefing`
+- `POST /capture`
+- `POST /capture/classify`
+- `POST /capture/confirm`
+- `GET /captures`
+- `GET /objects/{object_type}`
+- `POST /objects/{object_type}`
+- `POST /meeting-prep`
+- `POST /search`
+
+Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, and `metrics`.
+
+## Testing and Build
+
+Run backend tests:
+
+```bash
+python -m pytest -q
+```
+
+Build the frontend:
+
+```bash
+cd frontend
+npm run build
+```
+
+Makefile shortcuts:
+
+```bash
+make test
+make build-frontend
+make build-backend
+make start-frontend
+```
+
+## Render Deployment
+
+The root `render.yaml` provisions:
+
+- `executiveos-backend`: Docker web service
+- `executiveos-frontend`: static Vite site
+- `executiveos-db`: PostgreSQL database
+
+During Blueprint deployment, Render wires `DATABASE_URL` into the backend and `VITE_API_URL` into the frontend. Add `EXECUTIVEOS_PASSWORD` and `OPENAI_API_KEY` manually in Render's Environment page. Data stored in local SQLite is for development only and is not migrated to Render.

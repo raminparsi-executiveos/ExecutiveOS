@@ -1,15 +1,44 @@
 # Information Model
 
+ExecutiveOS stores executive memory as typed objects plus immutable capture history. Generated outputs are disposable views over the stored memory.
+
 ## Core Objects
 
-- Person
-- Company
-- StrategicIssue
-- Project
-- Decision
-- Meeting
-- SOP
-- Document
-- Metric
+| Object | Purpose |
+| --- | --- |
+| `Company` | Business context, leadership, issues, projects, people, KPIs, decisions, and meetings. |
+| `Person` | Role, company, responsibilities, strengths, concerns, priorities, performance notes, and links. |
+| `StrategicIssue` | Active or historical strategic concern with owner, current thinking, risks, and links. |
+| `Project` | Initiative with objective, status, owner, milestones, risks, next steps, and links. |
+| `Decision` | Decision record with context, options, final decision, reasoning, outcome, review date, and links. |
+| `Meeting` | Meeting memory with attendees, summary, decisions, action items, questions, and links. |
+| `SOP` | Operating process with purpose, owner, process details, escalation rules, and related projects. |
+| `Document` | Reference document metadata and summary. |
+| `Metric` | KPI or measurement with value, date, trend, and related issue. |
+| `CaptureRecord` | Raw confirmed capture text, classification source, saved count, and timestamp. |
 
-These objects are linked together to preserve context and decision history.
+## API Object Types
+
+The object listing and creation endpoints use these path names:
+
+- `companies`
+- `people`
+- `strategic-issues`
+- `projects`
+- `decisions`
+- `meetings`
+- `sops`
+- `documents`
+- `metrics`
+
+## Capture Rules
+
+- Suggestions must map to one of the supported object types.
+- Raw notes are not stored as first-class memory objects.
+- Capture records preserve the confirmed input as audit and search context.
+- Screenshots are not persisted as images.
+- Approved structured values are authoritative when they conflict with heuristic text detection.
+
+## Generated Outputs
+
+Briefings, meeting prep, and search answers are generated on demand from stored objects and capture history. They should not be treated as durable source-of-truth records.
