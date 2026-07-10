@@ -180,3 +180,50 @@ def test_capture_can_mark_existing_pricing_issue_resolved(monkeypatch):
 
     stored = next(item for item in client.get('/objects/strategic-issues').json()['items'] if item['title'] == 'Quote generator pricing issues')
     assert stored['status'] == 'resolved'
+
+
+def test_capture_can_remove_resolved_pricing_risk_from_morning_briefing(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
+    created = client.post('/objects/strategic-issues', json={'attributes': {
+        'title': 'Quote generator rollout validation',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'active',
+        'current_thinking': 'Keep validating the pricing workflow.',
+        'risks': ['Potential pricing inaccuracies', 'Slow estimator adoption'],
+    }})
+    assert created.status_code == 200
+
+    before = client.get('/briefing').json()
+    assert 'Potential pricing inaccuracies' in [
+        item['title'] for item in before['needs_your_attention']
+    ]
+
+    classified = client.post('/capture/classify', json={
+        'text': 'Mark potential pricing inaccuracies as resolved',
+    })
+    assert classified.status_code == 200
+    update = next(update for update in classified.json()['suggested_updates'] if update['type'] == 'strategic_issue')
+    assert update['title'] == 'Quote generator rollout validation'
+    assert update['risks'] == ['Slow estimator adoption']
+    assert update.get('status') != 'resolved'
+
+    saved = client.post('/capture/confirm', json={
+        'text': 'Mark potential pricing inaccuracies as resolved',
+        'approved_updates': [update],
+        'classification_source': 'local_fallback',
+    })
+    assert saved.status_code == 200
+
+    after = client.get('/briefing').json()
+    visible_titles = [
+        item['title'] for section in ('needs_your_attention', 'top_priorities') for item in after[section]
+    ]
+    assert 'Potential pricing inaccuracies' not in visible_titles
+
+    stored = next(
+        item for item in client.get('/objects/strategic-issues').json()['items']
+        if item['title'] == 'Quote generator rollout validation'
+    )
+    assert stored['status'] == 'active'
+    assert stored['risks'] == ['Slow estimator adoption']

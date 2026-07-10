@@ -79,6 +79,23 @@ def _matches_resolution_target(item: Any, fields: list[str], target: str) -> boo
     return _match_score(item, fields, target) >= 6
 
 
+def _text_matches_resolution_target(value: str, target: str) -> bool:
+    if not value or not target:
+        return False
+    if capture_resolves_waiting_item(target, value) or capture_resolves_waiting_item(value, target):
+        return True
+    value_tokens = _normalized_tokens(value)
+    target_tokens = _normalized_tokens(target)
+    matched = value_tokens & target_tokens
+    return len(matched) >= max(2, min(len(value_tokens), len(target_tokens)) - 1)
+
+
+def _prune_resolved_values(values: list[str] | None, target: str) -> tuple[list[str], bool]:
+    existing = list(values or [])
+    pruned = [value for value in existing if not _text_matches_resolution_target(str(value), target)]
+    return pruned, len(pruned) != len(existing)
+
+
 def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
     target = _resolution_target_from_text(text)
     if not target:
@@ -97,7 +114,17 @@ def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
                 "verification_state": "user_confirmed",
             })
     for issue in db.query(StrategicIssue).filter(StrategicIssue.status == "active").all():
-        if _matches_resolution_target(issue, ["title", "current_thinking", "risks"], target):
+        remaining_risks, removed_risk = _prune_resolved_values(issue.risks, target)
+        if removed_risk:
+            suggestions.append({
+                "type": "strategic_issue",
+                "title": issue.title,
+                "risks": remaining_risks,
+                "details": f"Remove resolved risk from strategic issue #{issue.id}.",
+                "memory_classification": "confirmed_fact",
+                "verification_state": "user_confirmed",
+            })
+        elif _matches_resolution_target(issue, ["title", "current_thinking"], target):
             suggestions.append({
                 "type": "strategic_issue",
                 "title": issue.title,
@@ -107,7 +134,17 @@ def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
                 "verification_state": "user_confirmed",
             })
     for project in db.query(Project).filter(Project.status == "active").all():
-        if _matches_resolution_target(project, ["title", "objective", "risks", "next_steps"], target):
+        remaining_risks, removed_risk = _prune_resolved_values(project.risks, target)
+        if removed_risk:
+            suggestions.append({
+                "type": "project",
+                "title": project.title,
+                "risks": remaining_risks,
+                "details": f"Remove resolved risk from project #{project.id}.",
+                "memory_classification": "confirmed_fact",
+                "verification_state": "user_confirmed",
+            })
+        elif _matches_resolution_target(project, ["title", "objective", "next_steps"], target):
             suggestions.append({
                 "type": "project",
                 "title": project.title,
@@ -379,6 +416,80 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
     return instance
 
 
+def _instance_snapshot(instance: Any) -> dict[str, Any]:
+    return {column.name: getattr(instance, column.key) for column in instance.__table__.columns}
+
+
+def _record_capture_change(db: Session, record_type: str, instance: Any, text: str, change_type: str) -> None:
+    if not getattr(instance, "id", None):
+        return
+    ensure_provenance(
+        db,
+        record_type,
+        instance.id,
+        source_type="capture_text",
+        source_title="Capture",
+        source_excerpt=text,
+        created_by="user",
+        confidence="user_confirmed",
+        verification_state="user_confirmed",
+        memory_classification="confirmed_fact",
+    )
+    record_revision(
+        db,
+        record_type,
+        instance.id,
+        after=_instance_snapshot(instance),
+        change_type=change_type,
+        source_type="capture_text",
+    )
+
+
+def _apply_explicit_resolution(db: Session, text: str) -> None:
+    if not _is_explicit_resolution(text):
+        return
+    target = _resolution_target_from_text(text)
+    if not target:
+        return
+
+    for task in db.query(Task).filter(Task.status.in_(OPEN_TASK_STATUSES)).all():
+        if _matches_resolution_target(task, ["title", "description", "source_summary"], target):
+            complete_task(db, task)
+            _record_capture_change(db, "task", task, text, "capture_explicit_resolution")
+
+    for issue in db.query(StrategicIssue).filter(StrategicIssue.status == "active").all():
+        changed = False
+        remaining_risks, removed_risk = _prune_resolved_values(issue.risks, target)
+        if removed_risk:
+            issue.risks = remaining_risks
+            changed = True
+        if _matches_resolution_target(issue, ["title", "current_thinking"], target):
+            issue.status = "resolved"
+            changed = True
+        if changed:
+            db.add(issue)
+            db.flush()
+            _record_capture_change(db, "strategic_issue", issue, text, "capture_explicit_resolution")
+
+    for project in db.query(Project).filter(Project.status == "active").all():
+        changed = False
+        remaining_risks, removed_risk = _prune_resolved_values(project.risks, target)
+        if removed_risk:
+            project.risks = remaining_risks
+            changed = True
+        remaining_steps, removed_step = _prune_resolved_values(project.next_steps, target)
+        if removed_step:
+            project.next_steps = remaining_steps
+            changed = True
+        if _matches_resolution_target(project, ["title", "objective"], target):
+            project.status = "completed"
+            changed = True
+        if changed:
+            db.add(project)
+            db.flush()
+            _record_capture_change(db, "project", project, text, "capture_explicit_resolution")
+
+
 def _apply_approved_updates(
     db: Session,
     text: str,
@@ -436,6 +547,8 @@ def _apply_approved_updates(
                 issue.current_thinking = (
                     update.get("current_thinking") or update.get("details") or issue.current_thinking
                 )
+                if "risks" in update and update.get("risks") is not None:
+                    issue.risks = update["risks"]
                 issue.status = update.get("status") or issue.status
                 db.flush()
         elif update_type == "company" and update_name:
@@ -504,10 +617,12 @@ def _apply_approved_updates(
                 db,
                 update_type,
                 saved_instance.id,
-                after={column.name: getattr(saved_instance, column.key) for column in saved_instance.__table__.columns},
+                after=_instance_snapshot(saved_instance),
                 change_type="capture_approval",
                 source_type=source_type,
             )
+
+    _apply_explicit_resolution(db, text)
 
     db.add(CaptureRecord(
         raw_text=text,
