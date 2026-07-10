@@ -90,6 +90,13 @@ def _text_matches_resolution_target(value: str, target: str) -> bool:
     return len(matched) >= max(2, min(len(value_tokens), len(target_tokens)) - 1)
 
 
+def capture_explicitly_resolves_item(capture_text: str, item_text: str) -> bool:
+    target = _resolution_target_from_text(capture_text)
+    if not target or target.lower() in {"it", "this", "that", "item"}:
+        return False
+    return _is_explicit_resolution(capture_text) and _text_matches_resolution_target(item_text, target)
+
+
 def _prune_resolved_values(values: list[str] | None, target: str) -> tuple[list[str], bool]:
     existing = list(values or [])
     pruned = [value for value in existing if not _text_matches_resolution_target(str(value), target)]

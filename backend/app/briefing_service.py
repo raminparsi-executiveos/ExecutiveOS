@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .capture_service import capture_resolves_waiting_item
+from .capture_service import capture_explicitly_resolves_item, capture_resolves_waiting_item
 from .memory import _result_summary, company_label_for_text
 from .models import BriefingView, CaptureRecord, Decision, Meeting, Metric, Person, Project, StrategicIssue, Task
 from .tasks import OPEN_TASK_STATUSES, task_is_overdue
@@ -263,7 +263,11 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     )
 
     def action_is_resolved(action: str) -> bool:
-        return any(capture_resolves_waiting_item(context, action) for context in resolution_contexts)
+        return any(
+            capture_resolves_waiting_item(context, action)
+            or capture_explicitly_resolves_item(context, action)
+            for context in resolution_contexts
+        )
 
     visible_open_tasks = [
         task for task in open_tasks
@@ -293,7 +297,12 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
         if not action_is_resolved(str(action))
         and not any(task.title.lower() == str(action).lower() and task.source_type == "meeting" for task in tasks)
     ]
-    risk_items = [_risk_item(item, risk) for item in [*issues, *projects] for risk in (item.risks or [])]
+    risk_items = [
+        _risk_item(item, risk)
+        for item in [*issues, *projects]
+        for risk in (item.risks or [])
+        if not action_is_resolved(str(risk))
+    ]
     context_priorities = [
         _dashboard_item(
             project,

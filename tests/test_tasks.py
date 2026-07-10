@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
 from app.main import app
+from app.database import SessionLocal
+from app.models import CaptureRecord
 
 
 client = TestClient(app)
@@ -227,3 +229,28 @@ def test_capture_can_remove_resolved_pricing_risk_from_morning_briefing(monkeypa
     )
     assert stored['status'] == 'active'
     assert stored['risks'] == ['Slow estimator adoption']
+
+
+def test_briefing_hides_longer_risk_resolved_by_recent_capture():
+    created = client.post('/objects/strategic-issues', json={'attributes': {
+        'title': 'Quote generator rollout validation',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'active',
+        'current_thinking': 'Keep validating the pricing workflow.',
+        'risks': ['Potential pricing inaccuracies if logic is not fully validated'],
+    }})
+    assert created.status_code == 200
+
+    db = SessionLocal()
+    try:
+        db.add(CaptureRecord(raw_text='Mark potential pricing inaccuracies as resolved'))
+        db.commit()
+    finally:
+        db.close()
+
+    briefing = client.get('/briefing').json()
+    visible_titles = [
+        item['title'] for section in ('needs_your_attention', 'top_priorities') for item in briefing[section]
+    ]
+    assert 'Potential pricing inaccuracies if logic is not fully validated' not in visible_titles
