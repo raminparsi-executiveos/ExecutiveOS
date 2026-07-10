@@ -1,0 +1,141 @@
+import os
+import sys
+
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
+
+from app.main import app
+
+
+client = TestClient(app)
+
+
+def test_tasks_can_be_created_completed_reopened_and_deleted():
+    created = client.post('/objects/tasks', json={'attributes': {
+        'title': 'Kyle will send the revised client-retention plan',
+        'description': 'Send revised client-retention plan.',
+        'company': 'PEC',
+        'owner': 'Kyle',
+        'due_date': '2026-07-11',
+        'status': 'open',
+        'priority': 'high',
+        'source_type': 'manual',
+        'next_action': 'Review the revised plan',
+        'tags': ['client-retention'],
+    }})
+    assert created.status_code == 200
+    task = created.json()['object']
+    assert task['owner'] == 'Kyle'
+    assert task['status'] == 'open'
+    assert task['is_overdue'] is False
+
+    completed = client.post(f"/tasks/{task['id']}/complete")
+    assert completed.status_code == 200
+    assert completed.json()['task']['status'] == 'completed'
+    assert completed.json()['task']['completed_at']
+
+    briefing = client.get('/briefing').json()
+    assert 'Kyle will send the revised client-retention plan' not in [
+        item['label'] for item in briefing['open_tasks']
+    ]
+
+    reopened = client.post(f"/tasks/{task['id']}/reopen")
+    assert reopened.status_code == 200
+    assert reopened.json()['task']['status'] == 'open'
+    assert reopened.json()['task']['completed_at'] is None
+
+    deleted = client.delete(f"/objects/tasks/{task['id']}")
+    assert deleted.status_code == 200
+
+
+def test_task_validation_and_overdue_derivation():
+    invalid_status = client.post('/objects/tasks', json={'attributes': {
+        'title': 'Bad task',
+        'status': 'done',
+    }})
+    assert invalid_status.status_code == 422
+
+    overdue = client.post('/objects/tasks', json={'attributes': {
+        'title': 'Overdue executive commitment',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'due_date': '2020-01-01',
+        'status': 'open',
+        'priority': 'critical',
+    }})
+    assert overdue.status_code == 200
+    assert overdue.json()['object']['is_overdue'] is True
+
+    briefing = client.get('/briefing').json()
+    assert 'Overdue executive commitment' in [item['label'] for item in briefing['overdue_tasks']]
+
+
+def test_local_capture_suggests_and_saves_task_commitment(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
+    classified = client.post('/capture/classify', json={
+        'text': 'Kyle will send the revised client-retention plan by Friday.',
+    })
+    assert classified.status_code == 200
+    task_update = next(update for update in classified.json()['suggested_updates'] if update['type'] == 'task')
+    assert task_update['owner'] == 'Kyle'
+    assert task_update['due_date'] == 'Friday'
+
+    saved = client.post('/capture/confirm', json={
+        'text': 'Kyle will send the revised client-retention plan by Friday.',
+        'classification_source': 'local_fallback',
+        'approved_updates': [task_update],
+    })
+    assert saved.status_code == 200
+
+    tasks = client.get('/objects/tasks').json()['items']
+    assert any(task['title'] == 'Kyle will send the revised client-retention plan by Friday' for task in tasks)
+
+
+def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions():
+    meeting = client.post('/objects/meetings', json={'attributes': {
+        'title': 'PEC client retention review',
+        'company': 'PEC',
+        'action_items': ['Kyle: send revised client-retention plan'],
+    }})
+    assert meeting.status_code == 200
+    meeting_id = meeting.json()['object']['id']
+
+    tasks = client.get('/objects/tasks').json()['items']
+    linked = next(task for task in tasks if task['title'] == 'Kyle: send revised client-retention plan')
+    assert linked['source_type'] == 'meeting'
+    assert linked['source_id'] == str(meeting_id)
+    assert linked['source_summary'] == 'PEC client retention review'
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC client retention review'}).json()
+    assert 'Kyle: send revised client-retention plan' in prep['action_items']
+
+    completed = client.post(f"/tasks/{linked['id']}/complete")
+    assert completed.status_code == 200
+    refreshed_meeting = client.get('/objects/meetings').json()['items']
+    stored = next(item for item in refreshed_meeting if item['id'] == meeting_id)
+    assert stored['action_items'] == ['Kyle: send revised client-retention plan']
+
+    briefing = client.get('/briefing').json()
+    assert 'Kyle: send revised client-retention plan' not in [
+        item['label'] for item in briefing['open_tasks']
+    ]
+
+
+def test_search_includes_open_tasks_and_excludes_completed_actions():
+    created = client.post('/objects/tasks', json={'attributes': {
+        'title': 'Sam call volume referral partners',
+        'company': 'RYSE Wellness',
+        'owner': 'Sam',
+        'status': 'open',
+        'priority': 'medium',
+    }})
+    assert created.status_code == 200
+    task_id = created.json()['object']['id']
+
+    search = client.post('/search', json={'query': 'What action items are open at RYSE?'}).json()
+    assert 'Sam call volume referral partners' in search['answer']
+
+    client.post(f'/tasks/{task_id}/complete')
+    completed_search = client.post('/search', json={'query': 'What action items are open at RYSE?'}).json()
+    assert 'Sam call volume referral partners' not in completed_search['answer']

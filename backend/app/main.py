@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .auth import auth_configuration_checks, auth_configured, auth_required, authenticate, require_auth
 from .database import Base, engine, get_db
-from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, StrategicIssue
+from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, StrategicIssue, Task
 from .schemas import (
     CaptureClassificationRequest,
     CaptureConfirmationRequest,
@@ -25,12 +25,20 @@ from .schemas import (
     UpdateObjectRequest,
 )
 from .seed import seed_data
-from .capture_service import _apply_approved_updates, _classify_capture_text, capture_resolves_waiting_item
+from .briefing_service import build_ranked_briefing
+from .capture_service import _apply_approved_updates, _classify_capture_text
+from .tasks import (
+    OPEN_TASK_STATUSES,
+    complete_task,
+    ensure_tasks_for_meeting_action_items,
+    reopen_task,
+    task_is_overdue,
+    validate_task_attributes,
+)
 from .memory import (
     SEARCH_CONFIG,
     _answer_for_ranked_items,
     _belongs_to_company,
-    company_label_for_text,
     _company_in_query,
     _entity_name_boost,
     _match_score,
@@ -108,82 +116,8 @@ def login(payload: LoginRequest, request: Request):
 
 
 @app.get("/briefing")
-def briefing(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
-    today = date.today().isoformat()
-    issues = db.query(StrategicIssue).filter(StrategicIssue.status == "active").order_by(StrategicIssue.id.desc()).all()
-    people = db.query(Person).order_by(Person.id.desc()).all()
-    decisions = db.query(Decision).order_by(Decision.id.desc()).all()
-    meetings = db.query(Meeting).filter(Meeting.date == today).order_by(Meeting.id.desc()).all()
-    all_meetings = db.query(Meeting).all()
-    projects = db.query(Project).order_by(Project.id.desc()).all()
-    recent_captures = _unique_captures(
-        db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
-    )
-    resolution_contexts = [capture.raw_text for capture in recent_captures]
-    resolution_contexts.extend(
-        " ".join([
-            person.name or "",
-            person.role or "",
-            person.company or "",
-            " ".join(person.responsibilities or []),
-            " ".join(person.current_priorities or []),
-            " ".join(person.performance_notes or []),
-        ])
-        for person in people
-    )
-
-    def action_is_resolved(action: str) -> bool:
-        return any(capture_resolves_waiting_item(context, action) for context in resolution_contexts)
-
-    risks = [
-        {"label": risk, "company": item.company or ""}
-        for item in [*issues, *projects]
-        for risk in (item.risks or [])
-    ]
-    waiting_on = [
-        {"label": action, "company": meeting.company or ""}
-        for meeting in all_meetings
-        for action in (meeting.action_items or [])
-        if not action_is_resolved(action)
-    ]
-    priority_items = [
-        {"label": project.title, "company": project.company or ""}
-        for project in projects
-        if project.status == "active"
-    ] + [
-        {"label": issue.title, "company": issue.company or ""}
-        for issue in issues
-    ]
-    priorities = list({(item["label"], item["company"]): item for item in priority_items}.values())
-    focus = priorities[0]["label"] if priorities else (decisions[0].title if decisions else "Capture the most important current context")
-    return {
-        "top_priorities": priorities[:8],
-        "strategic_issues": [
-            {"label": issue.title, "company": issue.company or ""}
-            for issue in issues[:8]
-        ],
-        "meetings_today": [
-            {"label": meeting.title, "company": meeting.company or ""}
-            for meeting in meetings
-        ],
-        "open_decisions": list({
-            (decision.title, decision.company or ""): {"label": decision.title, "company": decision.company or ""}
-            for decision in decisions
-            if not decision.review_date or decision.review_date >= today
-        }.values())[:8],
-        "people_needing_attention": [
-            {"label": person.name, "company": person.company or ""}
-            for person in people
-            if person.concerns
-        ][:5],
-        "waiting_on_items": waiting_on[:8],
-        "risks": risks[:8],
-        "recent_updates": [
-            {"label": _result_summary(capture), "company": company_label_for_text(capture.raw_text)}
-            for capture in recent_captures
-        ],
-        "recommended_focus": f"Focus first on {focus}."
-    }
+def briefing(db: Session = Depends(get_db), user: str = Depends(require_auth)):
+    return build_ranked_briefing(db, user)
 
 
 @app.post("/capture")
@@ -255,9 +189,14 @@ def create_object(object_type: str, payload: CreateObjectRequest, db: Session = 
     identity_field = "name" if "name" in valid_fields else "title"
     if not str(payload.attributes.get(identity_field) or "").strip():
         raise HTTPException(status_code=422, detail=f"Missing required field: {identity_field}")
+    if model is Task:
+        validate_task_attributes(payload.attributes)
     try:
         instance = model(**payload.attributes)
         db.add(instance)
+        db.flush()
+        if model is Meeting:
+            ensure_tasks_for_meeting_action_items(db, instance)
         db.commit()
         db.refresh(instance)
     except IntegrityError as error:
@@ -285,12 +224,21 @@ def update_object(
     identity_field = "name" if "name" in valid_fields else "title"
     if identity_field in payload.attributes and not str(payload.attributes.get(identity_field) or "").strip():
         raise HTTPException(status_code=422, detail=f"Missing required field: {identity_field}")
+    if model is Task:
+        validate_task_attributes(payload.attributes, partial=True)
     instance = db.get(model, object_id)
     if not instance:
         raise HTTPException(status_code=404, detail="Object not found")
     try:
         for field, value in payload.attributes.items():
             setattr(instance, field, value)
+        if model is Task and "status" in payload.attributes:
+            if instance.status == "completed":
+                complete_task(db, instance)
+            elif instance.status in OPEN_TASK_STATUSES:
+                instance.completed_at = None
+        if model is Meeting:
+            ensure_tasks_for_meeting_action_items(db, instance)
         db.commit()
         db.refresh(instance)
     except IntegrityError as error:
@@ -300,6 +248,36 @@ def update_object(
         db.rollback()
         raise HTTPException(status_code=400, detail="Object could not be updated") from error
     return {"message": f"{object_type} updated", "object": _serialize_model(instance)}
+
+
+@app.post("/tasks/{task_id}/complete")
+def complete_task_endpoint(task_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        complete_task(db, task)
+        db.commit()
+        db.refresh(task)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Task could not be completed") from error
+    return {"message": "Task completed", "task": _serialize_model(task)}
+
+
+@app.post("/tasks/{task_id}/reopen")
+def reopen_task_endpoint(task_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        reopen_task(db, task)
+        db.commit()
+        db.refresh(task)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Task could not be reopened") from error
+    return {"message": "Task reopened", "task": _serialize_model(task)}
 
 
 @app.delete("/objects/{object_type}/{object_id}")
@@ -358,6 +336,15 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     meetings = _rank_for_context(scoped_items(Meeting), SEARCH_CONFIG[Meeting][1], context_query)[:5]
     metrics = _rank_for_context(scoped_items(Metric), SEARCH_CONFIG[Metric][1], context_query, include_unmatched=include_company_unmatched)
     projects = _rank_for_context(scoped_items(Project), SEARCH_CONFIG[Project][1], context_query, include_unmatched=include_company_unmatched)
+    tasks = [
+        task for task in _rank_for_context(
+            scoped_items(Task),
+            SEARCH_CONFIG[Task][1],
+            context_query,
+            include_unmatched=include_company_unmatched,
+        )
+        if task.status in OPEN_TASK_STATUSES
+    ]
     capture_candidates = scoped_items(CaptureRecord)
     minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
     captures = _unique_captures([
@@ -369,7 +356,10 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         for person in db.query(Person).all()
         if any(re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE) for capture in captures)
     ]
-    action_items = list(dict.fromkeys(item for meeting in meetings for item in (meeting.action_items or [])))
+    action_items = list(dict.fromkeys(
+        [task.title for task in tasks] +
+        [item for meeting in meetings for item in (meeting.action_items or [])]
+    ))
     risks = list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
 
     def topical(labels: list[str]) -> list[str]:
@@ -398,7 +388,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     ]
     return {
         "meeting": meeting_title,
-        "context_found": bool(company or issues or decisions or people or meetings or metrics or projects or captures),
+        "context_found": bool(company or issues or decisions or people or meetings or metrics or projects or tasks or captures),
         "agenda": agenda,
         "related_people": related_people,
         "related_strategic_issues": related_issues,
@@ -406,7 +396,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "open_decisions": related_decisions,
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
         "recent_capture_context": [_result_summary(capture) for capture in captures],
-        "action_items": action_items[:5],
+        "action_items": action_items[:8],
         "metrics": metric_summaries,
         "risks": risks[:5],
     }
@@ -439,12 +429,18 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                 continue
             if risk_intent and (model not in {StrategicIssue, Project} or not item.risks):
                 continue
-            if action_intent and (model is not Meeting or not item.action_items):
+            if action_intent and (
+                (model is Meeting and not item.action_items)
+                or (model is Task and item.status in {"completed", "cancelled"})
+                or model not in {Meeting, Task}
+            ):
                 continue
             if question_intent and (model is not Meeting or not item.open_questions):
                 continue
             if overdue_intent and (
-                model is not Decision or not item.review_date or item.review_date >= date.today().isoformat()
+                (model is Decision and (not item.review_date or item.review_date >= date.today().isoformat()))
+                or (model is Task and not task_is_overdue(item))
+                or model not in {Decision, Task}
             ):
                 continue
             if meetings_today_intent and (model is not Meeting or item.date != date.today().isoformat()):
@@ -457,7 +453,11 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                 score = 12
             if not score and model is Meeting and (action_intent or question_intent):
                 score = 12
+            if not score and model is Task and (action_intent or overdue_intent or query_tokens & {"task", "tasks", "commitment", "commitments"}):
+                score = 12
             if not score and model is Decision and overdue_intent:
+                score = 12
+            if not score and model is Task and overdue_intent:
                 score = 12
             if not score and model is Meeting and meetings_today_intent:
                 score = 12

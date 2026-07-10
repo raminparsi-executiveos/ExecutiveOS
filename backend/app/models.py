@@ -150,6 +150,27 @@ class Metric(TimestampMixin, Base):
     notes = Column(Text, default="")
 
 
+class Task(TimestampMixin, Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True, nullable=False)
+    description = Column(Text, default="")
+    company = Column(String, default="")
+    owner = Column(String, default="")
+    due_date = Column(String, default="")
+    status = Column(String, default="open", index=True)
+    priority = Column(String, default="medium", index=True)
+    source_type = Column(String, default="manual")
+    source_id = Column(String, default="")
+    source_summary = Column(Text, default="")
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_reviewed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_action = Column(Text, default="")
+    blocked_by = Column(Text, default="")
+    tags = Column(JSON, default=list)
+
+
 class CaptureRecord(Base):
     __tablename__ = "capture_records"
 
@@ -158,3 +179,11 @@ class CaptureRecord(Base):
     classification_source = Column(String, default="unknown")
     saved_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class BriefingView(Base):
+    __tablename__ = "briefing_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    last_viewed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

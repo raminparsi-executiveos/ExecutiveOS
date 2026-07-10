@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class SuggestedUpdate(BaseModel):
-    type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric"]
+    type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric", "task"]
     name: str = ""
     title: str = ""
     company: str = ""
@@ -47,6 +47,14 @@ class SuggestedUpdate(BaseModel):
     trend: str = ""
     notes: str = ""
     related_strategic_issue: str = ""
+    due_date: str = ""
+    priority: str = ""
+    source_type: str = ""
+    source_id: str = ""
+    source_summary: str = ""
+    next_action: str = ""
+    blocked_by: str = ""
+    tags: list[str] = Field(default_factory=list)
 
 
 class CaptureAnalysis(BaseModel):
@@ -57,9 +65,10 @@ class CaptureAnalysis(BaseModel):
 SYSTEM_PROMPT = """You organize executive memory from natural-language capture.
 Extract only facts supported by the capture. Propose atomic updates using only these
 types: person, company, strategic_issue, project, decision, meeting, sop, document,
-metric. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
-dates when present. Use ISO dates when the date is explicit. Do not create tasks or raw
-notes. Put useful missing-context questions in follow_ups. Never invent facts.
+metric, task. Create task suggestions for commitments, owners, blockers, and action
+items. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
+dates when present. Use ISO dates when the date is explicit. Do not create raw notes.
+Put useful missing-context questions in follow_ups. Never invent facts.
 Treat explicit corrections as authoritative. In phrases such as "X, not Y", never
 assign Y. A person update that changes employment must include the corrected company.
 Treat similar names as distinct identities unless the user explicitly says they are
