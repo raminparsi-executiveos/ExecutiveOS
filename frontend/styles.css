@@ -426,10 +426,7 @@ select {
   font-size: 1.05rem;
 }
 
-.prep-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.9fr);
-  gap: 14px;
+.prep-command-grid {
   align-items: start;
 }
 
@@ -440,16 +437,19 @@ select {
   background: white;
 }
 
-.agenda-panel {
+.agenda-panel,
+.prep-agenda {
   border-left: 5px solid #0f172a;
 }
 
-.agenda-panel ol {
+.agenda-panel ol,
+.prep-agenda ol {
   margin: 10px 0 0;
   padding-left: 24px;
 }
 
-.agenda-panel li + li {
+.agenda-panel li + li,
+.prep-agenda li + li {
   margin-top: 9px;
 }
 
@@ -463,6 +463,19 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
   margin-top: 14px;
+}
+
+.prep-supporting {
+  margin-top: 18px;
+}
+
+.prep-detail-body {
+  margin-top: 10px;
+  padding: 10px 0 0 12px;
+}
+
+.prep-detail-body ul {
+  margin-bottom: 0;
 }
 
 .prep-section-heading {

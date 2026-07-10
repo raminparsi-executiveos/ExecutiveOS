@@ -165,14 +165,61 @@ function renderPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothi
   `;
 }
 
+function renderAgendaSection(items) {
+  return `
+    <article class="prep-section prep-agenda">
+      <div class="prep-section-heading">
+        <h4>Proposed agenda</h4>
+        <span class="count-pill">${itemCount(items)}</span>
+      </div>
+      ${items?.length ? `<ol>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>` : '<p class="muted">No agenda items found.</p>'}
+    </article>
+  `;
+}
+
+function renderCollapsedPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothing found.') {
+  return `
+    <details class="briefing-details prep-detail">
+      <summary><span>${escapeHtml(title)}</span><span class="count-pill">${itemCount(items)}</span></summary>
+      <div class="prep-detail-body prep-${tone}">
+        ${renderList(items, emptyMessage)}
+      </div>
+    </details>
+  `;
+}
+
 function prepItems(prep, detailKey, fallbackKey) {
   return prep[detailKey]?.length ? prep[detailKey] : prep[fallbackKey];
 }
 
 function renderMeetingPrepOutput(prep) {
+  const actionItems = prepItems(prep, 'action_items_detail', 'action_items') || [];
+  const openCommitments = prepItems(prep, 'open_commitments_detail', 'open_commitments') || [];
+  const overdueTasks = prepItems(prep, 'overdue_tasks_detail', 'overdue_tasks') || [];
   const contextCount = itemCount(prep.related_people) + itemCount(prep.related_strategic_issues)
     + itemCount(prep.related_projects) + itemCount(prep.open_decisions)
     + itemCount(prep.metrics) + itemCount(prep.risks);
+  const commandSections = [
+    { title: 'Proposed agenda', items: prep.agenda || [], tone: 'agenda', renderer: renderAgendaSection },
+    { title: 'Action items', items: actionItems, tone: 'action', empty: 'No open action items.' },
+    { title: 'Questions to ask', items: prep.questions_to_ask || [], tone: 'decision' },
+    { title: 'Open decisions', items: prep.open_decisions || [], tone: 'decision', empty: 'No open decisions.' },
+    { title: 'Risks', items: prep.risks || [], tone: 'risk', empty: 'No risks found.' },
+    { title: 'Overdue tasks', items: overdueTasks, tone: 'risk' },
+  ].filter((section) => section.title === 'Proposed agenda' || itemCount(section.items) > 0);
+  const supportingSections = [
+    ['Open commitments', openCommitments, 'action'],
+    ['Conflicts or contradictions', prep.conflicts_or_contradictions || [], 'risk'],
+    ['People', prep.related_people || [], 'people'],
+    ['Strategic issues', prep.related_strategic_issues || [], 'issue'],
+    ['Projects', prep.related_projects || [], 'project'],
+    ['Metrics', prep.metrics || [], 'metric'],
+    ['Sensitive people context', prep.sensitive_people_context || [], 'people'],
+    ['Suggested follow-up actions', prep.suggested_follow_up_actions || [], 'action'],
+    ['Recent meeting context', prep.recent_meeting_context || [], 'context'],
+    ['Recent captured updates', prep.recent_capture_context || [], 'context'],
+  ];
+  const supportingCount = supportingSections.reduce((count, [, items]) => count + itemCount(items), 0);
   return `
     <div class="meeting-prep-output">
       <header class="meeting-prep-header">
@@ -183,39 +230,22 @@ function renderMeetingPrepOutput(prep) {
         <div class="prep-stats" aria-label="Meeting prep summary">
           <span><strong>${itemCount(prep.agenda)}</strong> agenda</span>
           <span><strong>${contextCount}</strong> context</span>
-          <span><strong>${itemCount(prep.action_items)}</strong> actions</span>
+          <span><strong>${itemCount(actionItems)}</strong> actions</span>
         </div>
       </header>
-      <div class="prep-layout">
-        <section class="agenda-panel">
-          <div class="prep-section-heading">
-            <h4>Proposed agenda</h4>
-            <span class="count-pill">${itemCount(prep.agenda)}</span>
-          </div>
-          <ol>
-            ${(prep.agenda || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
-          </ol>
-        </section>
-        <section class="prep-stack">
-          ${renderPrepSection('Action items', prepItems(prep, 'action_items_detail', 'action_items'), 'action', 'No open action items.')}
-          ${renderPrepSection('Risks', prep.risks, 'risk', 'No risks found.')}
-          ${renderPrepSection('Open decisions', prep.open_decisions, 'decision', 'No open decisions.')}
-        </section>
+      <div class="command-grid prep-command-grid">
+        ${commandSections.map((section) => (
+          section.renderer
+            ? section.renderer(section.items)
+            : renderPrepSection(section.title, section.items, section.tone, section.empty)
+        )).join('')}
       </div>
-      <div class="prep-grid">
-        ${renderPrepSection('Questions to ask', prep.questions_to_ask, 'decision')}
-        ${renderPrepSection('Open commitments', prepItems(prep, 'open_commitments_detail', 'open_commitments'), 'action')}
-        ${renderPrepSection('Overdue tasks', prepItems(prep, 'overdue_tasks_detail', 'overdue_tasks'), 'risk')}
-        ${renderPrepSection('Conflicts or contradictions', prep.conflicts_or_contradictions, 'risk')}
-        ${renderPrepSection('People', prep.related_people, 'people')}
-        ${renderPrepSection('Strategic issues', prep.related_strategic_issues, 'issue')}
-        ${renderPrepSection('Projects', prep.related_projects, 'project')}
-        ${renderPrepSection('Metrics', prep.metrics, 'metric')}
-        ${renderPrepSection('Sensitive people context', prep.sensitive_people_context, 'people')}
-        ${renderPrepSection('Suggested follow-up actions', prep.suggested_follow_up_actions, 'action')}
-        ${renderPrepSection('Recent meeting context', prep.recent_meeting_context, 'context')}
-        ${renderPrepSection('Recent captured updates', prep.recent_capture_context, 'context')}
-      </div>
+      <details class="supporting-briefing prep-supporting">
+        <summary><span>Supporting context</span><span class="count-pill">${supportingCount}</span></summary>
+        <div class="briefing-grid">
+          ${supportingSections.map(([title, items, tone]) => renderCollapsedPrepSection(title, items, tone)).join('')}
+        </div>
+      </details>
     </div>
   `;
 }
