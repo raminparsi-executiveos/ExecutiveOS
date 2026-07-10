@@ -107,3 +107,8 @@ class EntityAliasRequest(BaseModel):
     entity_id: int = Field(ge=1)
     alias: str = Field(min_length=1, max_length=200)
     confidence: str = Field(default="user_confirmed", max_length=50)
+
+
+class BackupImportRequest(BaseModel):
+    backup: dict[str, Any] = Field(default_factory=dict)
+    mode: str = Field(default="merge", max_length=20)

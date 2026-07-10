@@ -33,6 +33,25 @@ def test_people_can_be_created_and_listed():
     assert any(item['name'] == 'Mina' for item in data['items'])
 
 
+def test_objects_can_be_filtered_by_company():
+    client.post('/objects/projects', json={'attributes': {
+        'title': 'PEC filtered project',
+        'company': 'PEC',
+    }})
+    client.post('/objects/projects', json={'attributes': {
+        'title': 'RYSE filtered project',
+        'company': 'RYSE Wellness',
+    }})
+
+    pec = client.get('/objects/projects?company=PEC').json()['items']
+    assert any(item['title'] == 'PEC filtered project' for item in pec)
+    assert not any(item['title'] == 'RYSE filtered project' for item in pec)
+
+    companies = client.get('/objects/companies?company=PEC').json()['items']
+    assert companies
+    assert all(item['name'] == 'PEC' for item in companies)
+
+
 def test_objects_reject_unknown_fields():
     response = client.post('/objects/people', json={'attributes': {'name': 'Kai', 'admin': True}})
     assert response.status_code == 422

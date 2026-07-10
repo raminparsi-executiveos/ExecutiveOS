@@ -90,9 +90,28 @@
 - Added memory classification and verification state fields to capture suggestions and provenance records.
 - Briefing/search/prep surfaces preserve classification/provenance context instead of treating every suggestion as an equally verified fact.
 
+### Next Candidate: Memory Backup Import/Export
+
+- Added versioned JSON backup export for durable memory, provenance, revisions, alerts, inbox records, dashboard configs, aliases, captures, briefing views, and search conversations.
+- Added explicit backup import in merge or replace mode.
+- Added Memory UI controls for exporting a backup file and importing a reviewed backup file.
+
+### Next Candidate: Richer Linking Between Related Objects
+
+- Added read-only related-memory graph endpoints for stored objects.
+- Related-memory lookup combines explicit `linked_*` fields, reciprocal references, meeting-task source metadata, attendees, and same-company context.
+- Added Memory UI controls to inspect related records grouped by object type.
+
+### Next Candidate: Per-Company Filters and Memory Browsing
+
+- Added company-scoped object listing through the `company` query parameter.
+- Added Memory UI company filtering so stored objects can be browsed in a company context.
+
+### Next Candidate: Capture Observability
+
+- Added capture observability endpoint with classification-source counts, AI/fallback usage, fallback rate, image-unavailable count, saved-update totals, and recent capture previews.
+- Added Capture UI quality panel so AI classification quality and fallback frequency can be monitored during normal use.
+
 ## Next Candidates
 
-- Add import/export for memory backup.
-- Add richer linking between related objects.
-- Add per-company filters and memory browsing views.
-- Add observability for AI classification quality and fallback frequency.
+- Review deployed usage and identify the next enhancement set.

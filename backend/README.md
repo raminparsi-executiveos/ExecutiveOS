@@ -68,6 +68,10 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `POST` | `/integration-inbox/{item_id}/approve` | Saves reviewed inbox suggestions through the approval workflow. |
 | `POST` | `/entity-aliases` | Stores a confirmed alias for entity resolution. |
 | `GET` | `/entity-resolution/suggestions` | Lists possible duplicate or alias relationships requiring confirmation. |
+| `GET` | `/backup/export` | Exports a versioned JSON backup of durable memory, provenance, review state, aliases, inbox records, dashboards, captures, and conversations. |
+| `POST` | `/backup/import` | Imports a backup in `merge` or explicit `replace` mode. |
+| `GET` | `/objects/{object_type}/{object_id}/related` | Returns related memory grouped by object type using explicit links, reciprocal links, meeting/task source metadata, attendees, and company context. |
+| `GET` | `/capture/observability` | Summarizes capture classification sources, fallback rate, image-unavailable count, saved updates, and recent capture previews. |
 | `POST` | `/tasks/{task_id}/complete` | Marks a task complete and keeps it searchable. |
 | `POST` | `/tasks/{task_id}/reopen` | Reopens a completed or cancelled task. |
 | `POST` | `/meeting-prep` | Generates agenda and context for a meeting. |
@@ -75,11 +79,19 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 
 Object types: `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
 
+Object listing accepts an optional `company` query parameter for company-scoped memory browsing. For `companies`, the filter applies to company name; for other objects with a `company` field, it applies to that field.
+
 Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
 
 The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
 
 Capture-approved records, manual object edits, and inbox approvals create provenance/revision records. Search supports company, record type, date, status, owner, priority, and conversation filters and returns directly supported facts, inferences, missing information, and supporting records.
+
+Backup import/export is intentionally explicit and user-initiated. Merge mode upserts records by backup id; replace mode clears supported memory tables before restoring the uploaded backup.
+
+Related-memory lookup is read-only. It does not create inferred links; it exposes the current graph from stored structured fields and source metadata.
+
+Capture observability is read-only and derived from `capture_records`; it does not inspect prompts, screenshots, or model internals.
 
 ## Docker
 

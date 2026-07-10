@@ -276,6 +276,31 @@ function editableObjectAttributes(item) {
   return attributes;
 }
 
+function renderRelatedPanel(related) {
+  const groups = Object.entries(related.related || {});
+  return `
+    <div class="editor-panel related-panel">
+      <div class="section-heading">
+        <div>
+          <h3>Related memory</h3>
+          <p class="muted">${escapeHtml(related.object?.name || related.object?.title || 'Selected object')}</p>
+        </div>
+        <button id="related-close" type="button" class="secondary">Close</button>
+      </div>
+      ${groups.length ? groups.map(([recordType, items]) => `
+        <details class="briefing-details" open>
+          <summary><span>${escapeHtml(humanize(recordType))}</span><span class="count-pill">${itemCount(items)}</span></summary>
+          ${renderList(items.map((item) => ({
+            label: item.label,
+            company: item.company,
+            status: item.reason,
+          })), 'No related records.')}
+        </details>
+      `).join('') : '<p class="muted">No related records found yet.</p>'}
+    </div>
+  `;
+}
+
 let active = 'capture';
 let briefing = null;
 let meetingPrep = null;
@@ -285,13 +310,18 @@ let screenshots = [];
 let searchQuery = '';
 let meetingQuery = '';
 let memoryType = 'people';
+let memoryCompanyFilter = '';
 let memoryObjects = null;
 let memoryLoading = false;
 let memoryEdit = null;
+let memoryRelated = null;
 let memoryMessage = '';
+let backupImportMode = 'merge';
 let captureResult = null;
 let classificationResult = null;
 let selectedUpdateIndices = [];
+let captureObservability = null;
+let captureObservabilityLoading = false;
 let apiError = null;
 let briefingLoading = false;
 let submitting = false;
@@ -336,7 +366,10 @@ async function loadMemoryObjects() {
   memoryLoading = true;
   memoryMessage = '';
   try {
-    memoryObjects = await safeJsonFetch(apiUrl(`/objects/${memoryType}`));
+    const params = new URLSearchParams();
+    if (memoryCompanyFilter.trim()) params.set('company', memoryCompanyFilter.trim());
+    const query = params.toString();
+    memoryObjects = await safeJsonFetch(apiUrl(`/objects/${memoryType}${query ? `?${query}` : ''}`));
     apiError = null;
   } catch (error) {
     setApiError(error.message);
@@ -571,6 +604,7 @@ function render() {
           briefing = null;
           meetingPrep = null;
           searchResults = null;
+          captureObservability = null;
           classificationResult = null;
           selectedUpdateIndices = [];
           captureText = '';
@@ -675,7 +709,87 @@ function render() {
       memoryType = select.value;
       memoryObjects = null;
       memoryEdit = null;
+      memoryRelated = null;
       memoryMessage = '';
+      render();
+    });
+
+    const companyFilterInput = app.querySelector('#memory-company-filter');
+    companyFilterInput?.addEventListener('input', (event) => {
+      memoryCompanyFilter = event.target.value;
+    });
+    app.querySelector('#memory-filter-apply')?.addEventListener('click', () => {
+      memoryObjects = null;
+      memoryEdit = null;
+      memoryRelated = null;
+      render();
+    });
+    companyFilterInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') app.querySelector('#memory-filter-apply')?.click();
+    });
+    app.querySelector('#memory-filter-clear')?.addEventListener('click', () => {
+      memoryCompanyFilter = '';
+      memoryObjects = null;
+      memoryEdit = null;
+      memoryRelated = null;
+      render();
+    });
+
+    app.querySelector('#backup-mode')?.addEventListener('change', (event) => {
+      backupImportMode = event.target.value;
+    });
+
+    app.querySelector('#backup-export')?.addEventListener('click', async () => {
+      if (submitting) return;
+      submitting = true;
+      render();
+      try {
+        const backup = await safeJsonFetch(apiUrl('/backup/export'));
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const date = new Date().toISOString().slice(0, 10);
+        anchor.href = url;
+        anchor.download = `executiveos-backup-${date}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        memoryMessage = 'Backup exported.';
+        apiError = null;
+      } catch (error) {
+        setApiError(error.message);
+      } finally {
+        submitting = false;
+      }
+      render();
+    });
+
+    app.querySelector('#backup-import-file')?.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file || submitting) return;
+      submitting = true;
+      render();
+      try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+        const result = await safeJsonFetch(apiUrl('/backup/import'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backup, mode: backupImportMode }),
+        });
+        memoryObjects = null;
+        memoryRelated = null;
+        memoryEdit = null;
+        briefing = null;
+        meetingPrep = null;
+        searchResults = null;
+        memoryMessage = `${result.total_imported || 0} backup records imported.`;
+        apiError = null;
+      } catch (error) {
+        setApiError(error.message);
+      } finally {
+        submitting = false;
+        event.target.value = '';
+      }
       render();
     });
 
@@ -689,9 +803,35 @@ function render() {
           title: item[currentMemoryType().titleField] || `${currentMemoryType().label} #${id}`,
           text: JSON.stringify(editableObjectAttributes(item), null, 2),
         };
+        memoryRelated = null;
         memoryMessage = '';
         render();
       });
+    });
+
+    app.querySelectorAll('[data-related-object]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (submitting) return;
+        const id = Number(button.getAttribute('data-related-object'));
+        submitting = true;
+        render();
+        try {
+          memoryRelated = await safeJsonFetch(apiUrl(`/objects/${memoryType}/${id}/related`));
+          memoryEdit = null;
+          memoryMessage = '';
+          apiError = null;
+        } catch (error) {
+          setApiError(error.message);
+        } finally {
+          submitting = false;
+        }
+        render();
+      });
+    });
+
+    app.querySelector('#related-close')?.addEventListener('click', () => {
+      memoryRelated = null;
+      render();
     });
 
     app.querySelectorAll('[data-reopen-task]').forEach((button) => {
@@ -741,6 +881,7 @@ function render() {
           body: JSON.stringify({ attributes }),
         });
         memoryEdit = null;
+        memoryRelated = null;
         memoryObjects = null;
         memoryMessage = 'Memory object updated.';
         briefing = null;
@@ -761,6 +902,7 @@ function render() {
       try {
         await safeJsonFetch(apiUrl(`/objects/${memoryType}/${memoryEdit.id}`), { method: 'DELETE' });
         memoryEdit = null;
+        memoryRelated = null;
         memoryObjects = null;
         memoryMessage = 'Memory object deleted.';
         briefing = null;
@@ -868,6 +1010,18 @@ function setApiError(error) {
 
 function renderPanel() {
   if (active === 'capture') {
+    if (!captureObservability && !captureObservabilityLoading) {
+      captureObservabilityLoading = true;
+      safeJsonFetch(apiUrl('/capture/observability'))
+        .then((data) => {
+          captureObservability = data;
+        })
+        .catch(() => {})
+        .finally(() => {
+          captureObservabilityLoading = false;
+          render();
+        });
+    }
     return `
       <h2>Capture</h2>
       <p>Enter natural language or attach a screenshot, then review and approve the structured updates.</p>
@@ -907,6 +1061,18 @@ function renderPanel() {
         </div>
       ` : ''}
       ${captureResult ? `<p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>` : ''}
+      ${captureObservability ? `
+        <details class="backup-panel">
+          <summary><span>Capture quality</span></summary>
+          <div class="capture-quality">
+            <span><strong>${escapeHtml(captureObservability.total_captures)}</strong> captures</span>
+            <span><strong>${escapeHtml(captureObservability.ai_captures)}</strong> AI</span>
+            <span><strong>${escapeHtml(captureObservability.fallback_captures)}</strong> fallback</span>
+            <span><strong>${escapeHtml(Math.round((captureObservability.fallback_rate || 0) * 100))}%</strong> fallback rate</span>
+            <span><strong>${escapeHtml(captureObservability.saved_updates)}</strong> saved updates</span>
+          </div>
+        </details>
+      ` : ''}
     `;
   }
 
@@ -984,7 +1150,24 @@ function renderPanel() {
         <select id="memory-type">
           ${memoryTypes.map((type) => `<option value="${type.key}" ${type.key === memoryType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`).join('')}
         </select>
+        <label for="memory-company-filter">Company</label>
+        <input id="memory-company-filter" value="${escapeHtml(memoryCompanyFilter)}" placeholder="All companies" />
+        <button id="memory-filter-apply" type="button" class="secondary">Apply</button>
+        ${memoryCompanyFilter ? '<button id="memory-filter-clear" type="button" class="secondary">Clear</button>' : ''}
       </div>
+      <details class="backup-panel">
+        <summary><span>Memory backup</span></summary>
+        <div class="backup-controls">
+          <button id="backup-export" type="button" class="secondary" ${submitting ? 'disabled' : ''}>Export JSON</button>
+          <label for="backup-mode">Import mode</label>
+          <select id="backup-mode">
+            <option value="merge" ${backupImportMode === 'merge' ? 'selected' : ''}>Merge</option>
+            <option value="replace" ${backupImportMode === 'replace' ? 'selected' : ''}>Replace all</option>
+          </select>
+          <label class="file-button" for="backup-import-file">Import JSON</label>
+          <input id="backup-import-file" type="file" accept="application/json,.json" />
+        </div>
+      </details>
       ${memoryMessage ? `<p class="success" role="status">${escapeHtml(memoryMessage)}</p>` : ''}
       ${memoryLoading || !memoryObjects ? '<p>Loading memory…</p>' : `
         <div class="memory-list">
@@ -998,12 +1181,14 @@ function renderPanel() {
               <div class="object-actions">
                 ${memoryType === 'tasks' && item.status !== 'completed' ? `<button type="button" class="secondary" data-complete-task="${escapeHtml(item.id)}">Complete</button>` : ''}
                 ${memoryType === 'tasks' && item.status === 'completed' ? `<button type="button" class="secondary" data-reopen-task="${escapeHtml(item.id)}">Reopen</button>` : ''}
+                <button type="button" class="secondary" data-related-object="${escapeHtml(item.id)}">Related</button>
                 <button type="button" class="secondary" data-edit-object="${escapeHtml(item.id)}">Edit</button>
               </div>
             </article>
           `).join('') : '<p class="muted">No objects found for this type.</p>'}
         </div>
       `}
+      ${memoryRelated ? renderRelatedPanel(memoryRelated) : ''}
       ${memoryEdit ? `
         <div class="editor-panel">
           <div class="section-heading">

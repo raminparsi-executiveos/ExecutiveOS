@@ -12,7 +12,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .auth import auth_configuration_checks, auth_configured, auth_required, authenticate, require_auth
+from .backup_service import export_backup, import_backup
 from .database import Base, engine, get_db
+from .linking_service import related_records
 from .models import (
     CaptureRecord,
     Company,
@@ -31,6 +33,7 @@ from .models import (
     Task,
 )
 from .schemas import (
+    BackupImportRequest,
     CaptureClassificationRequest,
     CaptureConfirmationRequest,
     CaptureRequest,
@@ -90,6 +93,7 @@ from .memory import (
     _unique_captures,
     RESULT_TYPES,
 )
+from .observability_service import capture_observability
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -202,16 +206,41 @@ def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(g
     }
 
 
+@app.get("/backup/export")
+def export_memory_backup(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    return export_backup(db)
+
+
+@app.post("/backup/import")
+def import_memory_backup(payload: BackupImportRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    try:
+        summary = import_backup(db, payload.backup, payload.mode)
+        db.commit()
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Backup could not be imported") from error
+    return {"message": "Backup imported", **summary}
+
+
 @app.get("/objects/{object_type}")
 def list_objects(
     object_type: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    company: str = Query(default="", max_length=100),
     db: Session = Depends(get_db),
     _user: str = Depends(require_auth),
 ):
     model = _model_for_object_type(object_type)
     query = db.query(model)
+    if company:
+        if model is Company:
+            query = query.filter(Company.name.ilike(company))
+        elif "company" in model.__table__.columns:
+            query = query.filter(getattr(model, "company").ilike(company))
     total = query.count()
     items = query.order_by(model.id.desc()).offset(offset).limit(limit).all()
     return {"items": [_serialize_model(item) for item in items], "total": total, "limit": limit, "offset": offset}
@@ -384,6 +413,14 @@ def object_history(object_type: str, object_id: int, db: Session = Depends(get_d
     return provenance_bundle(db, object_type, object_id)
 
 
+@app.get("/objects/{object_type}/{object_id}/related")
+def object_related_records(object_type: str, object_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    related = related_records(db, object_type, object_id)
+    if not related:
+        raise HTTPException(status_code=404, detail="Object not found")
+    return related
+
+
 @app.get("/review-alerts")
 def list_review_alerts(
     refresh: bool = Query(default=True),
@@ -529,6 +566,15 @@ def capture_history(
         "limit": limit,
         "offset": offset,
     }
+
+
+@app.get("/capture/observability")
+def capture_quality_observability(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    return capture_observability(db, days)
 
 
 @app.post("/meeting-prep")

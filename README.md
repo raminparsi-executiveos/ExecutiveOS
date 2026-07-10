@@ -14,6 +14,7 @@ The app ships the core executive-memory workflows plus roadmap support surfaces:
 6. **Review Alerts**: inspect stale, overdue, contradictory, or duplicate-looking memory and resolve alerts explicitly.
 7. **Company Dashboards**: view configurable company-specific modules with data freshness.
 8. **Integration Inbox**: stage Google Calendar event data and uploaded-document text for review before approval.
+9. **Memory Backup**: export durable memory to a JSON backup or import a reviewed backup in merge or replace mode.
 
 ## Tech Stack
 
@@ -100,12 +101,16 @@ Important endpoints:
 - `POST /capture`
 - `POST /capture/classify`
 - `POST /capture/confirm`
+- `GET /capture/observability`
+- `GET /backup/export`
+- `POST /backup/import`
 - `GET /captures`
 - `GET /objects/{object_type}`
 - `POST /objects/{object_type}`
 - `PATCH /objects/{object_type}/{object_id}`
 - `DELETE /objects/{object_type}/{object_id}`
 - `GET /objects/{object_type}/{object_id}/history`
+- `GET /objects/{object_type}/{object_id}/related`
 - `GET /review-alerts`
 - `POST /review-alerts/{alert_id}/resolve`
 - `GET /dashboards/{company}`
@@ -122,7 +127,15 @@ Supported object types are `companies`, `people`, `strategic-issues`, `projects`
 
 Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` remain on the meeting record for audit, and linked task records are completed explicitly rather than by fuzzy text deletion. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
 
+Object listing supports `?company=...` for company-scoped memory browsing. The Memory screen includes the same filter so related company context can be reviewed without switching to company dashboards.
+
 Provenance and revision history are stored separately from memory objects. Search responses distinguish directly supported facts, inferences, and missing information. Meeting prep supports meeting type and section exclusions. Integration Inbox suggestions never modify durable memory until approved.
+
+Memory backups use a versioned JSON envelope containing durable memory tables, provenance, revision history, review alerts, integration inbox records, dashboard configuration, aliases, captures, and conversations. Import defaults to merge mode; replace mode intentionally clears supported memory tables before restoring the backup.
+
+Related memory views combine explicit `linked_*` fields, reciprocal links, task/meeting source links, attendees, and same-company context so related records can be inspected without duplicating memory.
+
+Capture observability summarizes recent classification sources, fallback frequency, image-unavailable events, and saved-update rates so AI quality and local fallback usage can be monitored.
 
 ## Testing and Build
 
