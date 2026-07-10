@@ -4,13 +4,16 @@ ExecutiveOS is an AI-first executive memory and decision platform for founders, 
 
 ## Current MVP
 
-The app ships five working workflows:
+The app ships the core executive-memory workflows plus roadmap support surfaces:
 
 1. **Capture**: enter natural language or attach a PNG, JPEG, or WebP screenshot, review suggested structured updates, and save only the approved items.
 2. **Morning Briefing**: review a ranked command center with needs-attention, delegation, overdue, blocked/waiting, changed-since-last-briefing, and upcoming sections, plus supporting memory context.
 3. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures, including unresolved company context for general leadership reviews.
 4. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
 5. **Memory**: browse stored objects, edit their fields, complete or reopen tasks, or delete incorrect records.
+6. **Review Alerts**: inspect stale, overdue, contradictory, or duplicate-looking memory and resolve alerts explicitly.
+7. **Company Dashboards**: view configurable company-specific modules with data freshness.
+8. **Integration Inbox**: stage Google Calendar event data and uploaded-document text for review before approval.
 
 ## Tech Stack
 
@@ -102,12 +105,24 @@ Important endpoints:
 - `POST /objects/{object_type}`
 - `PATCH /objects/{object_type}/{object_id}`
 - `DELETE /objects/{object_type}/{object_id}`
+- `GET /objects/{object_type}/{object_id}/history`
+- `GET /review-alerts`
+- `POST /review-alerts/{alert_id}/resolve`
+- `GET /dashboards/{company}`
+- `PUT /dashboards/{company}/config`
+- `GET /integration-inbox`
+- `POST /integration-inbox`
+- `POST /integration-inbox/{item_id}/approve`
+- `POST /entity-aliases`
+- `GET /entity-resolution/suggestions`
 - `POST /meeting-prep`
 - `POST /search`
 
 Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
 
 Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` remain on the meeting record for audit, and linked task records are completed explicitly rather than by fuzzy text deletion. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
+
+Provenance and revision history are stored separately from memory objects. Search responses distinguish directly supported facts, inferences, and missing information. Meeting prep supports meeting type and section exclusions. Integration Inbox suggestions never modify durable memory until approved.
 
 ## Testing and Build
 

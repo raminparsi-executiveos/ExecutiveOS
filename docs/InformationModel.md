@@ -18,6 +18,12 @@ ExecutiveOS stores executive memory as typed objects plus immutable capture hist
 | `Task` | Action item or commitment with owner, due date, status, priority, source metadata, blocker, next action, tags, completion history, and review timestamp. |
 | `CaptureRecord` | Raw confirmed capture text, classification source, saved count, and timestamp. |
 | `BriefingView` | Per-user last briefing view timestamp used to compute changed-since-last-briefing sections. |
+| `ProvenanceRecord` | Source traceability for memory records, including source type, identifier, excerpt, verification, classification, and supersession fields. |
+| `RevisionRecord` | Auditable before/after snapshots for creates, edits, deletes, capture approvals, and inbox approvals. |
+| `ReviewAlert` | User-resolved alert for stale, conflicting, overdue, duplicate-looking, or superseded memory. |
+| `IntegrationInboxItem` | Reviewed-only staging area for Google Calendar event data and uploaded-document text. |
+| `EntityAlias` | Confirmed alias for dynamic entity resolution without automatic merging. |
+| `DashboardConfig` | Configurable company dashboard module definitions. |
 
 ## API Object Types
 
@@ -57,3 +63,5 @@ The object listing and creation endpoints use these path names:
 Briefings, meeting prep, and search answers are generated on demand from stored objects and capture history. They should not be treated as durable source-of-truth records.
 
 Morning Briefing ranked items include title, company, owner, why it matters, status, due date, recommended next action, supporting source, score, and score reasons. Scores are transparent derived values based on priority, due date, overdue duration, status, risks, missing owner, executive ownership, recent changes, and blocked/waiting state.
+
+Search answers separate directly supported facts, inferences, and missing information. Integration Inbox records never modify memory until suggestions are approved. Review alerts are durable records with explicit resolution timestamps so dismissed issues do not repeatedly interrupt unless materially new evidence creates a new alert.

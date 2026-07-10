@@ -53,11 +53,46 @@
 - Added per-user briefing-view tracking so meaningful records changed after the prior briefing can be surfaced.
 - Updated the frontend briefing view into a compact executive command-center layout while preserving supporting memory sections.
 
+### Enhancement Roadmap Priority 3: Provenance and Source History
+
+- Added reusable provenance and revision-history records for durable memory.
+- Added object history endpoints exposing source type, source identifier, excerpt, confidence, verification state, classification, supersession fields, and revisions.
+
+### Enhancement Roadmap Priority 4: Contradiction and Stale-Memory Detection
+
+- Added review-alert records and detection for overdue tasks, overdue decisions, stale metrics, conflicting roles, multiple active project owners, and possible reversing decisions.
+- Added explicit alert resolution and dismissal flow.
+
+### Enhancement Roadmap Priority 5: Dynamic Meeting Preparation
+
+- Added meeting type, section exclusions, meeting objectives, desired outcomes, questions, open commitments, overdue tasks, metrics, risks, contradictions, sensitive people context, recent changes, follow-up actions, and inclusion reasons.
+
+### Enhancement Roadmap Priority 6: Semantic and Conversational Search
+
+- Added structured filters for company, record type, date range, status, owner, and priority.
+- Added conversation IDs plus answer categories for directly supported facts, inferences, missing information, supporting records, and provenance.
+
+### Enhancement Roadmap Priority 7: Company-Specific Dashboards
+
+- Added configurable company dashboard modules, hidden/reordered module support, data freshness, and empty-data indicators.
+
+### Enhancement Roadmap Priority 8: Integration Inbox
+
+- Added reviewed-only inbox flow for Google Calendar event data and uploaded-document text.
+- Added suggestion storage, duplicate source identifiers, rejected/approved statuses, source metadata, and approval through existing capture memory workflow.
+
+### Enhancement Roadmap Priority 9: Improved Entity Resolution
+
+- Added entity aliases and suggestion endpoints for possible duplicate people/company alias relationships without automatic merging.
+
+### Enhancement Roadmap Priority 10: Memory Type and Verification Classification
+
+- Added memory classification and verification state fields to capture suggestions and provenance records.
+- Briefing/search/prep surfaces preserve classification/provenance context instead of treating every suggestion as an equally verified fact.
+
 ## Next Candidates
 
-- Continue Enhancement Roadmap Priority 3: provenance and source history.
 - Add import/export for memory backup.
 - Add richer linking between related objects.
-- Add calendar and uploaded-document ingestion through the approved Integration Inbox scope.
 - Add per-company filters and memory browsing views.
 - Add observability for AI classification quality and fallback frequency.

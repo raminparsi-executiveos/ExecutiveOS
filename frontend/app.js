@@ -159,10 +159,16 @@ function renderMeetingPrepOutput(prep) {
         </section>
       </div>
       <div class="prep-grid">
+        ${renderPrepSection('Questions to ask', prep.questions_to_ask, 'decision')}
+        ${renderPrepSection('Open commitments', prep.open_commitments, 'action')}
+        ${renderPrepSection('Overdue tasks', prep.overdue_tasks, 'risk')}
+        ${renderPrepSection('Conflicts or contradictions', prep.conflicts_or_contradictions, 'risk')}
         ${renderPrepSection('People', prep.related_people, 'people')}
         ${renderPrepSection('Strategic issues', prep.related_strategic_issues, 'issue')}
         ${renderPrepSection('Projects', prep.related_projects, 'project')}
         ${renderPrepSection('Metrics', prep.metrics, 'metric')}
+        ${renderPrepSection('Sensitive people context', prep.sensitive_people_context, 'people')}
+        ${renderPrepSection('Suggested follow-up actions', prep.suggested_follow_up_actions, 'action')}
         ${renderPrepSection('Recent meeting context', prep.recent_meeting_context, 'context')}
         ${renderPrepSection('Recent captured updates', prep.recent_capture_context, 'context')}
       </div>
@@ -868,7 +874,13 @@ function renderPanel() {
     <label for="search-input" class="sr-only">Question about executive memory</label>
     <input id="search-input" placeholder="Example: Why did we promote Julio?" />
     <button id="search-submit" style="margin-top: 12px;" ${submitting ? 'disabled' : ''}>${submitting ? 'Searching…' : 'Ask ExecutiveOS'}</button>
-    ${searchResults ? `<div class="results"><aside class="focus"><strong>ExecutiveOS answer</strong><p>${escapeHtml(searchResults.answer || 'No matching executive memory found.')}</p></aside>${searchResults.results.length ? searchResults.results.map((result) => `
+    ${searchResults ? `<div class="results"><aside class="focus"><strong>ExecutiveOS answer</strong><p>${escapeHtml(searchResults.answer || 'No matching executive memory found.')}</p></aside>
+      <div class="prep-grid">
+        ${renderPrepSection('Directly supported facts', searchResults.directly_supported_facts, 'context')}
+        ${renderPrepSection('Inferences', searchResults.inferences, 'context', 'No inference needed.')}
+        ${renderPrepSection('Missing information', searchResults.missing_information, 'risk', 'No obvious gaps.')}
+      </div>
+      ${searchResults.results.length ? searchResults.results.map((result) => `
       <article><span class="badge">${escapeHtml(humanize(result.type))}</span><h3>${escapeHtml(result.title)}</h3><p>${escapeHtml(result.summary)}</p></article>
     `).join('') : '<p class="muted">No matching executive memory found.</p>'}</div>` : ''}
   `;

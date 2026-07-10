@@ -55,6 +55,8 @@ class SuggestedUpdate(BaseModel):
     next_action: str = ""
     blocked_by: str = ""
     tags: list[str] = Field(default_factory=list)
+    memory_classification: str = "confirmed_fact"
+    verification_state: str = "ai_extracted_pending_review"
 
 
 class CaptureAnalysis(BaseModel):
@@ -69,6 +71,9 @@ metric, task. Create task suggestions for commitments, owners, blockers, and act
 items. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
 dates when present. Use ISO dates when the date is explicit. Do not create raw notes.
 Put useful missing-context questions in follow_ups. Never invent facts.
+Classify each suggestion as one of confirmed_fact, decision, commitment, proposal,
+concern, assumption, recommendation, or unverified_information. Set verification_state
+to ai_extracted_pending_review unless the capture explicitly says the user confirmed it.
 Treat explicit corrections as authoritative. In phrases such as "X, not Y", never
 assign Y. A person update that changes employment must include the corrected company.
 Treat similar names as distinct identities unless the user explicitly says they are

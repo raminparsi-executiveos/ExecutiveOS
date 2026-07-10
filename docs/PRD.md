@@ -10,10 +10,13 @@ ExecutiveOS helps leaders preserve important company context as structured memor
 - Suggest structured memory updates for user approval.
 - Store approved updates as durable executive objects.
 - Track approved commitments and action items as first-class task records.
+- Preserve provenance, source history, verification state, and revision history for durable memory.
+- Detect stale or conflicting memory through review alerts that require explicit user resolution.
 - Generate a morning briefing from current memory.
-- Generate meeting prep from relevant company, project, people, decision, metric, meeting, and recent capture context.
-- Answer natural-language search questions with a direct answer and supporting records.
+- Generate adaptive meeting prep from relevant company, project, people, decision, metric, meeting, task, alert, and recent capture context.
+- Answer natural-language search questions with direct support, inferences, missing information, filters, and supporting records.
 - Browse, edit, and delete stored memory objects.
+- Stage Google Calendar event data and uploaded-document text in an approval-first Integration Inbox.
 - Support local development without an OpenAI key through a clearly labeled limited preview classifier.
 - Require authentication in hosted production.
 
@@ -59,3 +62,7 @@ The user browses stored memory by object type, opens a record, edits its fields,
 - Approved meeting action items create linked task records while preserving original meeting history.
 - Completed tasks no longer appear as open or waiting items but remain searchable and auditable.
 - Morning briefing does not simply sort by newest records; top recommendations expose ranking reasons and the next action.
+- Provenance and revisions can be inspected for a memory object.
+- Review alerts can be generated and resolved without silently rewriting memory.
+- Integration Inbox suggestions are not saved until approved.
+- Entity aliases are preserved, but possible duplicates are not automatically merged.

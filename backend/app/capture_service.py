@@ -11,6 +11,7 @@ from .memory import (
     _normalize_company,
 )
 from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document, Task
+from .roadmap_services import ensure_provenance, record_revision
 from .tasks import ensure_tasks_for_meeting_action_items, upsert_task_from_update
 
 
@@ -274,7 +275,7 @@ def _classify_capture_text(
     return updates, follow_ups, "local_fallback"
 
 
-def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
+def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
     model = {
         "project": Project,
         "meeting": Meeting,
@@ -300,7 +301,8 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
             setattr(instance, field, value)
     db.add(instance)
     db.flush()
-    return True
+    db.refresh(instance)
+    return instance
 
 
 def _apply_approved_updates(
@@ -321,6 +323,7 @@ def _apply_approved_updates(
     for raw_update in approved_updates:
         update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
         update_type = update.get("type")
+        saved_instance = None
         update_name = update.get("name") or detected_name
         proposed_company = _normalize_company(update.get("company") or "")
         if proposed_company and _company_is_explicitly_negated(text, proposed_company):
@@ -330,7 +333,7 @@ def _apply_approved_updates(
         # the former and new company in one capture.
         update_company = proposed_company or explicit_company
         if update_type == "person" and update_name:
-            _upsert_person(
+            saved_instance = _upsert_person(
                 db,
                 name=update_name,
                 company=update_company,
@@ -355,6 +358,7 @@ def _apply_approved_updates(
             title = update.get("title") or ("Improve PM quality" if "pm quality" in lowered else "")
             if title:
                 issue = _upsert_strategic_issue(db, title, company=update_company, owner=update.get("owner") or update_name)
+                saved_instance = issue
                 issue.current_thinking = (
                     update.get("current_thinking") or update.get("details") or issue.current_thinking
                 )
@@ -362,6 +366,7 @@ def _apply_approved_updates(
                 db.flush()
         elif update_type == "company" and update_name:
             company = _upsert_company(db, update_name)
+            saved_instance = company
             if update.get("description"):
                 company.description = update["description"]
                 db.flush()
@@ -379,8 +384,9 @@ def _apply_approved_updates(
                 if value not in (None, "", []):
                     setattr(decision, field, value)
             db.flush()
+            saved_instance = decision
         elif update_type == "task":
-            upsert_task_from_update(
+            saved_instance = upsert_task_from_update(
                 db,
                 update,
                 default_company=update_company,
@@ -399,12 +405,35 @@ def _apply_approved_updates(
                 if detail_field and not update.get(detail_field):
                     update = {**update, detail_field: update["details"]}
             handled = _apply_generic_update(db, update)
+            saved_instance = handled if handled is not True and handled is not False else None
             if handled and update_type == "meeting":
                 meeting_title = update.get("title")
                 if meeting_title:
                     meeting = db.query(Meeting).filter(Meeting.title.ilike(meeting_title)).first()
                     if meeting:
                         ensure_tasks_for_meeting_action_items(db, meeting)
+        if saved_instance is not None and getattr(saved_instance, "id", None):
+            source_type = update.get("source_type") or ("capture_text" if classification_source != "manual" else "manual_entry")
+            ensure_provenance(
+                db,
+                update_type,
+                saved_instance.id,
+                source_type=source_type,
+                source_title=update.get("source_title") or "Capture",
+                source_excerpt=text,
+                created_by="user",
+                confidence=update.get("confidence") or "user_confirmed",
+                verification_state=update.get("verification_state") or "user_confirmed",
+                memory_classification=update.get("memory_classification") or ("commitment" if update_type == "task" else "confirmed_fact"),
+            )
+            record_revision(
+                db,
+                update_type,
+                saved_instance.id,
+                after={column.name: getattr(saved_instance, column.key) for column in saved_instance.__table__.columns},
+                change_type="capture_approval",
+                source_type=source_type,
+            )
 
     db.add(CaptureRecord(
         raw_text=text,

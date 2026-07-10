@@ -59,6 +59,14 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Rank Morning Briefing into needs-attention, delegation, overdue, blocked/waiting, changed, and upcoming sections.
 - [x] Explain each ranked briefing item with score reasons, source, owner, due date, why it matters, and next action.
 - [x] Track the previous briefing view so new or updated memory can appear in Changed Since Last Briefing.
+- [x] Store provenance and revision history for approved captures and manual memory edits.
+- [x] Generate review alerts for stale, overdue, conflicting, and potentially superseded memory.
+- [x] Add adaptive meeting prep sections with meeting type, section exclusions, questions, commitments, overdue tasks, risks, contradictions, and follow-up actions.
+- [x] Return search filters, conversation IDs, directly supported facts, inferences, missing information, and provenance-aware supporting records.
+- [x] Add configurable company dashboards with data freshness and hidden/reordered modules.
+- [x] Add an approval-first Integration Inbox for Google Calendar event data and uploaded-document text.
+- [x] Add entity aliases and duplicate suggestions without automatic merges.
+- [x] Add memory classification and verification states to capture suggestions and provenance.
 
 ## Sample acceptance scenarios
 
@@ -76,6 +84,8 @@ Representative workflows were exercised against the API and shipping frontend.
 | `We decided to pause the Atlas launch because compliance is not ready.` | Local preview preserves both the decision and its reasoning. |
 | `Kyle will send the revised client-retention plan by Friday.` | Local preview suggests a task owned by Kyle with the due-date phrase preserved for review. |
 | Critical overdue task owned by the executive | It appears first in Needs Your Attention with overdue and priority score reasons. |
+| Uploaded document with a commitment | It enters Integration Inbox and only becomes memory after approval. |
+| Possible duplicate people | Entity-resolution suggestions ask for confirmation instead of merging automatically. |
 
 ## Verification commands
 

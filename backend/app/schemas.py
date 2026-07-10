@@ -34,10 +34,20 @@ class UpdateObjectRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
+    company: str = Field(default="", max_length=100)
+    record_types: list[str] = Field(default_factory=list, max_length=20)
+    status: str = Field(default="", max_length=50)
+    owner: str = Field(default="", max_length=100)
+    priority: str = Field(default="", max_length=50)
+    date_from: str = Field(default="", max_length=20)
+    date_to: str = Field(default="", max_length=20)
+    conversation_id: str = Field(default="", max_length=100)
 
 
 class MeetingPrepRequest(BaseModel):
     meeting: str = Field(default="", max_length=500)
+    meeting_type: str = Field(default="", max_length=100)
+    excluded_sections: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CaptureClassificationRequest(BaseModel):
@@ -67,3 +77,33 @@ class CaptureConfirmationRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
     approved_updates: list[SuggestedUpdate] = Field(default_factory=list, max_length=50)
     classification_source: str = Field(default="unknown", max_length=50)
+
+
+class ReviewAlertResolutionRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=50)
+    resolution: str = Field(default="", max_length=2_000)
+
+
+class DashboardConfigRequest(BaseModel):
+    modules: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+
+
+class IntegrationInboxCreateRequest(BaseModel):
+    source_type: str = Field(min_length=1, max_length=50)
+    source_identifier: str = Field(default="", max_length=300)
+    source_title: str = Field(default="", max_length=300)
+    source_date: str = Field(default="", max_length=50)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    extracted_text: str = Field(default="", max_length=100_000)
+
+
+class IntegrationInboxDecisionRequest(BaseModel):
+    suggestion_indexes: list[int] = Field(default_factory=list, max_length=50)
+    status: str = Field(default="approved", max_length=50)
+
+
+class EntityAliasRequest(BaseModel):
+    entity_type: str = Field(min_length=1, max_length=50)
+    entity_id: int = Field(ge=1)
+    alias: str = Field(min_length=1, max_length=200)
+    confidence: str = Field(default="user_confirmed", max_length=50)

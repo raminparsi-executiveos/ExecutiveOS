@@ -8,15 +8,25 @@ from .tasks import serialize_task
 
 OBJECT_MODEL_MAP = {
     "companies": Company,
+    "company": Company,
     "people": Person,
+    "person": Person,
     "strategic-issues": StrategicIssue,
+    "strategic_issue": StrategicIssue,
     "projects": Project,
+    "project": Project,
     "decisions": Decision,
+    "decision": Decision,
     "meetings": Meeting,
+    "meeting": Meeting,
     "sops": SOP,
+    "sop": SOP,
     "documents": Document,
+    "document": Document,
     "metrics": Metric,
+    "metric": Metric,
     "tasks": Task,
+    "task": Task,
 }
 
 
@@ -31,7 +41,7 @@ def _serialize_model(instance: Any) -> dict[str, Any]:
     if isinstance(instance, Task):
         return serialize_task(instance)
     return {
-        column.name: getattr(instance, column.name)
+        column.name: getattr(instance, column.key)
         for column in instance.__table__.columns
     }
 

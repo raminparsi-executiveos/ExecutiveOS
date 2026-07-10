@@ -187,3 +187,100 @@ class BriefingView(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     last_viewed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class ProvenanceRecord(TimestampMixin, Base):
+    __tablename__ = "provenance_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    object_type = Column(String, index=True, nullable=False)
+    object_id = Column(Integer, index=True, nullable=False)
+    original_source_type = Column(String, default="manual_entry", index=True)
+    original_source_id = Column(String, default="")
+    source_title = Column(String, default="")
+    source_date = Column(String, default="")
+    capture_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    source_excerpt = Column(Text, default="")
+    created_by = Column(String, default="user")
+    confidence = Column(String, default="user_confirmed")
+    verification_state = Column(String, default="user_confirmed", index=True)
+    memory_classification = Column(String, default="confirmed_fact", index=True)
+    superseded_by_type = Column(String, default="")
+    superseded_by_id = Column(Integer, nullable=True)
+
+
+class RevisionRecord(Base):
+    __tablename__ = "revision_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    object_type = Column(String, index=True, nullable=False)
+    object_id = Column(Integer, index=True, nullable=False)
+    changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    changed_by = Column(String, default="user")
+    change_type = Column(String, default="update")
+    before = Column(JSON, default=dict)
+    after = Column(JSON, default=dict)
+    source_type = Column(String, default="")
+    source_id = Column(String, default="")
+
+
+class ReviewAlert(TimestampMixin, Base):
+    __tablename__ = "review_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_type = Column(String, index=True, nullable=False)
+    title = Column(String, index=True, nullable=False)
+    description = Column(Text, default="")
+    severity = Column(String, default="medium", index=True)
+    status = Column(String, default="open", index=True)
+    object_type = Column(String, default="")
+    object_id = Column(Integer, nullable=True)
+    related_object_type = Column(String, default="")
+    related_object_id = Column(Integer, nullable=True)
+    evidence = Column(JSON, default=list)
+    resolution = Column(Text, default="")
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class IntegrationInboxItem(TimestampMixin, Base):
+    __tablename__ = "integration_inbox_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_type = Column(String, index=True, nullable=False)
+    source_identifier = Column(String, default="", index=True)
+    source_title = Column(String, default="")
+    source_date = Column(String, default="")
+    status = Column(String, default="new", index=True)
+    source_metadata = Column("metadata", JSON, key="source_metadata", default=dict)
+    extracted_text = Column(Text, default="")
+    suggested_updates = Column(JSON, default=list)
+    rejected_suggestions = Column(JSON, default=list)
+    confidence = Column(String, default="unverified")
+    error = Column(Text, default="")
+
+
+class EntityAlias(TimestampMixin, Base):
+    __tablename__ = "entity_aliases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String, index=True, nullable=False)
+    entity_id = Column(Integer, index=True, nullable=False)
+    alias = Column(String, index=True, nullable=False)
+    confidence = Column(String, default="user_confirmed")
+
+
+class DashboardConfig(TimestampMixin, Base):
+    __tablename__ = "dashboard_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company = Column(String, unique=True, index=True, nullable=False)
+    modules = Column(JSON, default=list)
+
+
+class SearchConversation(TimestampMixin, Base):
+    __tablename__ = "search_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String, unique=True, index=True, nullable=False)
+    last_query = Column(Text, default="")
+    context = Column(JSON, default=dict)

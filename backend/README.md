@@ -58,6 +58,16 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `POST` | `/objects/{object_type}` | Creates a stored object from validated attributes. |
 | `PATCH` | `/objects/{object_type}/{object_id}` | Updates validated fields on a stored object. |
 | `DELETE` | `/objects/{object_type}/{object_id}` | Deletes a stored object. |
+| `GET` | `/objects/{object_type}/{object_id}/history` | Returns provenance and revision history for a stored object. |
+| `GET` | `/review-alerts` | Generates and lists review alerts for stale, conflicting, overdue, or duplicate-looking memory. |
+| `POST` | `/review-alerts/{alert_id}/resolve` | Confirms, updates, merges, supersedes, or dismisses a review alert. |
+| `GET` | `/dashboards/{company}` | Returns a configurable company dashboard with data freshness. |
+| `PUT` | `/dashboards/{company}/config` | Updates visible dashboard modules and order. |
+| `GET` | `/integration-inbox` | Lists staged calendar/document inbox items. |
+| `POST` | `/integration-inbox` | Creates an inbox item from Google Calendar event data or uploaded-document text. |
+| `POST` | `/integration-inbox/{item_id}/approve` | Saves reviewed inbox suggestions through the approval workflow. |
+| `POST` | `/entity-aliases` | Stores a confirmed alias for entity resolution. |
+| `GET` | `/entity-resolution/suggestions` | Lists possible duplicate or alias relationships requiring confirmation. |
 | `POST` | `/tasks/{task_id}/complete` | Marks a task complete and keeps it searchable. |
 | `POST` | `/tasks/{task_id}/reopen` | Reopens a completed or cancelled task. |
 | `POST` | `/meeting-prep` | Generates agenda and context for a meeting. |
@@ -68,6 +78,8 @@ Object types: `companies`, `people`, `strategic-issues`, `projects`, `decisions`
 Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
 
 The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
+
+Capture-approved records, manual object edits, and inbox approvals create provenance/revision records. Search supports company, record type, date, status, owner, priority, and conversation filters and returns directly supported facts, inferences, missing information, and supporting records.
 
 ## Docker
 

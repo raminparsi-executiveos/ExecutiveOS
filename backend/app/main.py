@@ -13,14 +13,35 @@ from sqlalchemy.orm import Session
 
 from .auth import auth_configuration_checks, auth_configured, auth_required, authenticate, require_auth
 from .database import Base, engine, get_db
-from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, StrategicIssue, Task
+from .models import (
+    CaptureRecord,
+    Company,
+    DashboardConfig,
+    Decision,
+    EntityAlias,
+    IntegrationInboxItem,
+    Meeting,
+    Metric,
+    Person,
+    Project,
+    ProvenanceRecord,
+    RevisionRecord,
+    ReviewAlert,
+    StrategicIssue,
+    Task,
+)
 from .schemas import (
     CaptureClassificationRequest,
     CaptureConfirmationRequest,
     CaptureRequest,
     CreateObjectRequest,
+    DashboardConfigRequest,
+    EntityAliasRequest,
+    IntegrationInboxCreateRequest,
+    IntegrationInboxDecisionRequest,
     LoginRequest,
     MeetingPrepRequest,
+    ReviewAlertResolutionRequest,
     SearchRequest,
     UpdateObjectRequest,
 )
@@ -34,6 +55,18 @@ from .tasks import (
     reopen_task,
     task_is_overdue,
     validate_task_attributes,
+)
+from .roadmap_services import (
+    company_dashboard,
+    create_inbox_item,
+    entity_resolution_suggestions,
+    ensure_provenance,
+    generate_review_alerts,
+    get_dashboard_config,
+    provenance_bundle,
+    record_revision,
+    resolve_alert,
+    update_search_conversation,
 )
 from .memory import (
     SEARCH_CONFIG,
@@ -197,6 +230,24 @@ def create_object(object_type: str, payload: CreateObjectRequest, db: Session = 
         db.flush()
         if model is Meeting:
             ensure_tasks_for_meeting_action_items(db, instance)
+        ensure_provenance(
+            db,
+            object_type,
+            instance.id,
+            source_type="manual_entry",
+            source_title=f"Manual {object_type} entry",
+            source_excerpt=str(payload.attributes)[:1000],
+            created_by=_user,
+        )
+        record_revision(
+            db,
+            object_type,
+            instance.id,
+            after=_serialize_model(instance),
+            change_type="create",
+            changed_by=_user,
+            source_type="manual_entry",
+        )
         db.commit()
         db.refresh(instance)
     except IntegrityError as error:
@@ -230,6 +281,7 @@ def update_object(
     if not instance:
         raise HTTPException(status_code=404, detail="Object not found")
     try:
+        before = _serialize_model(instance)
         for field, value in payload.attributes.items():
             setattr(instance, field, value)
         if model is Task and "status" in payload.attributes:
@@ -239,6 +291,17 @@ def update_object(
                 instance.completed_at = None
         if model is Meeting:
             ensure_tasks_for_meeting_action_items(db, instance)
+        db.flush()
+        record_revision(
+            db,
+            object_type,
+            object_id,
+            before=before,
+            after=_serialize_model(instance),
+            change_type="update",
+            changed_by=_user,
+            source_type="manual_entry",
+        )
         db.commit()
         db.refresh(instance)
     except IntegrityError as error:
@@ -292,12 +355,158 @@ def delete_object(
     if not instance:
         raise HTTPException(status_code=404, detail="Object not found")
     try:
+        before = _serialize_model(instance)
+        record_revision(
+            db,
+            object_type,
+            object_id,
+            before=before,
+            change_type="delete",
+            changed_by=_user,
+            source_type="manual_entry",
+        )
         db.delete(instance)
         db.commit()
     except SQLAlchemyError as error:
         db.rollback()
         raise HTTPException(status_code=400, detail="Object could not be deleted") from error
     return {"message": f"{object_type} deleted", "id": object_id}
+
+
+@app.get("/objects/{object_type}/{object_id}/history")
+def object_history(object_type: str, object_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    _model_for_object_type(object_type)
+    return provenance_bundle(db, object_type, object_id)
+
+
+@app.get("/review-alerts")
+def list_review_alerts(
+    refresh: bool = Query(default=True),
+    status: str = Query(default="open", max_length=50),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    if refresh:
+        generate_review_alerts(db)
+    query = db.query(ReviewAlert)
+    if status:
+        query = query.filter(ReviewAlert.status == status)
+    return {"items": [_serialize_model(alert) for alert in query.order_by(ReviewAlert.id.desc()).all()]}
+
+
+@app.post("/review-alerts/{alert_id}/resolve")
+def resolve_review_alert(
+    alert_id: int,
+    payload: ReviewAlertResolutionRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    alert = db.get(ReviewAlert, alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Review alert not found")
+    try:
+        resolve_alert(db, alert, payload.action, payload.resolution)
+        db.commit()
+        db.refresh(alert)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Review alert could not be resolved") from error
+    return {"message": "Review alert resolved", "alert": _serialize_model(alert)}
+
+
+@app.get("/dashboards/{company}")
+def get_company_dashboard(company: str, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    return company_dashboard(db, company)
+
+
+@app.put("/dashboards/{company}/config")
+def update_company_dashboard_config(
+    company: str,
+    payload: DashboardConfigRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    config = get_dashboard_config(db, company)
+    config.modules = payload.modules
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return {"message": "Dashboard config updated", "config": _serialize_model(config)}
+
+
+@app.get("/integration-inbox")
+def list_integration_inbox(
+    status: str = Query(default="", max_length=50),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    query = db.query(IntegrationInboxItem)
+    if status:
+        query = query.filter(IntegrationInboxItem.status == status)
+    return {"items": [_serialize_model(item) for item in query.order_by(IntegrationInboxItem.id.desc()).all()]}
+
+
+@app.post("/integration-inbox")
+def create_integration_inbox_item(
+    payload: IntegrationInboxCreateRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    try:
+        item = create_inbox_item(db, payload)
+        db.commit()
+        db.refresh(item)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Inbox item could not be created") from error
+    return {"message": "Inbox item created", "item": _serialize_model(item)}
+
+
+@app.post("/integration-inbox/{item_id}/approve")
+def approve_integration_inbox_item(
+    item_id: int,
+    payload: IntegrationInboxDecisionRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    item = db.get(IntegrationInboxItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Inbox item not found")
+    selected = [
+        update for index, update in enumerate(item.suggested_updates or [])
+        if not payload.suggestion_indexes or index in payload.suggestion_indexes
+    ]
+    try:
+        if selected:
+            _apply_approved_updates(db, item.extracted_text or item.source_title, selected, item.source_type)
+        item.status = payload.status if payload.status in {"partially_approved", "approved", "dismissed"} else "approved"
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Inbox item could not be approved") from error
+    return {"message": "Inbox item reviewed", "item": _serialize_model(item)}
+
+
+@app.post("/entity-aliases")
+def create_entity_alias(payload: EntityAliasRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    _model_for_object_type(payload.entity_type)
+    alias = EntityAlias(
+        entity_type=payload.entity_type,
+        entity_id=payload.entity_id,
+        alias=payload.alias,
+        confidence=payload.confidence,
+    )
+    db.add(alias)
+    db.commit()
+    db.refresh(alias)
+    return {"message": "Entity alias saved", "alias": _serialize_model(alias)}
+
+
+@app.get("/entity-resolution/suggestions")
+def get_entity_resolution_suggestions(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    return {"items": entity_resolution_suggestions(db)}
 
 
 @app.get("/captures")
@@ -320,6 +529,8 @@ def capture_history(
 @app.post("/meeting-prep")
 def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     meeting_title = payload.meeting or "Executive meeting"
+    meeting_type = payload.meeting_type or "general executive meeting"
+    excluded_sections = {section.lower().replace(" ", "_") for section in payload.excluded_sections}
     company_name = _company_in_query(meeting_title)
     company = db.query(Company).filter(Company.name.ilike(company_name)).first() if company_name else None
     topic_query = _meeting_topic_query(meeting_title, company_name) if company_name else ""
@@ -386,8 +597,53 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         f"Review active projects: {', '.join(related_projects[:2]) if related_projects else 'No active projects'}",
         "Confirm risks, action items, and follow-up owners",
     ]
+    overdue_tasks = [task.title for task in tasks if task_is_overdue(task)]
+    open_commitments = [task.title for task in tasks if task.status in OPEN_TASK_STATUSES]
+    people_context = [
+        f"{person.name}: {person.role or 'No role'}{f' ({person.company})' if person.company else ''}"
+        for person in people
+        if person.concerns or person.performance_notes
+    ][:5]
+    inclusion_reasons = {
+        "people": "Matched by company, meeting topic, or recent capture context.",
+        "projects": "Active or relevant projects ranked by meeting topic.",
+        "decisions": "Open decisions and review items tied to the meeting context.",
+        "tasks": "Open commitments connected to the company, topic, or owner.",
+        "metrics": "Current metrics and company KPIs related to the meeting context.",
+        "risks": "Explicit risks attached to active issues or projects.",
+    }
+    dynamic_sections = {
+        "meeting_objective": f"Prepare for a {meeting_type} about {meeting_title}.",
+        "desired_outcome": "Leave with owners, decisions, risks, and next actions confirmed.",
+        "decisions_required": related_decisions,
+        "recommended_agenda": agenda,
+        "questions_to_ask": list(dict.fromkeys(
+            [question for meeting in meetings for question in (meeting.open_questions or [])] +
+            [f"What decision is needed on {decision}?" for decision in related_decisions[:3]] +
+            [f"What is blocking {task}?" for task in overdue_tasks[:3]]
+        ))[:8],
+        "open_commitments": open_commitments[:8],
+        "overdue_tasks": overdue_tasks[:8],
+        "relevant_metrics": metric_summaries,
+        "risks": risks[:8],
+        "conflicts_or_contradictions": [
+            alert.title for alert in db.query(ReviewAlert).filter(ReviewAlert.status == "open").all()
+            if not company_name or alert.description.lower().find(company_name.lower()) >= 0
+        ][:5],
+        "sensitive_people_context": people_context,
+        "recent_relevant_changes": [_result_summary(capture) for capture in captures],
+        "suggested_follow_up_actions": [
+            "Assign owners to unresolved commitments.",
+            "Record decisions and task changes immediately after the meeting.",
+        ],
+        "inclusion_reasons": inclusion_reasons,
+    }
+    for section in list(dynamic_sections):
+        if section in excluded_sections:
+            dynamic_sections[section] = [] if isinstance(dynamic_sections[section], list) else ""
     return {
         "meeting": meeting_title,
+        "meeting_type": meeting_type,
         "context_found": bool(company or issues or decisions or people or meetings or metrics or projects or tasks or captures),
         "agenda": agenda,
         "related_people": related_people,
@@ -399,6 +655,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "action_items": action_items[:8],
         "metrics": metric_summaries,
         "risks": risks[:5],
+        **dynamic_sections,
     }
 
 
@@ -406,7 +663,8 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
 def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     ranked_results = []
     query_tokens = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
-    target_company = _company_in_query(payload.query)
+    target_company = payload.company or _company_in_query(payload.query)
+    requested_types = {record_type.strip() for record_type in payload.record_types if record_type.strip()}
     mentioned_people = [
         person for person in db.query(Person).all()
         if re.search(rf"\b{re.escape(person.name)}\b", payload.query, flags=re.IGNORECASE)
@@ -422,8 +680,22 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
     overdue_intent = "overdue" in query_tokens
     meetings_today_intent = "today" in query_tokens and bool(query_tokens & {"meeting", "meetings"})
     for model, (title_field, fields) in SEARCH_CONFIG.items():
+        result_type = RESULT_TYPES[model]
+        if requested_types and result_type not in requested_types and model.__tablename__ not in requested_types:
+            continue
         for item in db.query(model).all():
             if target_company and not _belongs_to_company(item, target_company):
+                continue
+            if payload.status and str(getattr(item, "status", "")).lower() != payload.status.lower():
+                continue
+            if payload.owner and str(getattr(item, "owner", "")).lower() != payload.owner.lower():
+                continue
+            if payload.priority and str(getattr(item, "priority", "")).lower() != payload.priority.lower():
+                continue
+            item_date = str(getattr(item, "date", "") or getattr(item, "due_date", "") or getattr(item, "review_date", ""))
+            if payload.date_from and item_date and item_date < payload.date_from:
+                continue
+            if payload.date_to and item_date and item_date > payload.date_to:
                 continue
             if quantity_intent and model is not Metric:
                 continue
@@ -465,9 +737,10 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                 score += intent_score
                 score += _entity_name_boost(item, title_field, payload.query)
                 ranked_results.append((score, item.id or 0, item, {
-                    "type": RESULT_TYPES[model],
+                    "type": result_type,
                     "title": getattr(item, title_field),
                     "summary": _result_summary(item),
+                    "provenance": provenance_bundle(db, result_type, item.id or 0)["provenance"][:2],
                 }))
 
     for capture in db.query(CaptureRecord).all():
@@ -482,11 +755,22 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
                 "type": "capture",
                 "title": f"Captured update from {capture.created_at.date().isoformat()}",
                 "summary": _result_summary(capture),
+                "provenance": [],
             }))
 
     ranked_results.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
     if not ranked_results:
-        return {"query": payload.query, "answer": "No matching executive memory found.", "results": []}
+        conversation_id = update_search_conversation(db, payload.conversation_id, payload.query, [])
+        db.commit()
+        return {
+            "query": payload.query,
+            "conversation_id": conversation_id,
+            "answer": "No matching executive memory found.",
+            "directly_supported_facts": [],
+            "inferences": [],
+            "missing_information": ["No stored memory matched this question and filters."],
+            "results": [],
+        }
     # Keep close supporting matches while dropping weak records that happen to
     # share one generic word with the question.
     cutoff = max(1, ranked_results[0][0] - 6)
@@ -505,4 +789,26 @@ def search(payload: SearchRequest, db: Session = Depends(get_db), _user: str = D
             break
     results = [entry[3] for entry in included]
     answer = _answer_for_ranked_items([entry[2] for entry in included], payload.query)
-    return {"query": payload.query, "answer": answer, "results": results}
+    direct_facts = [result["summary"] for result in results[:5] if result.get("summary")]
+    inferences = []
+    if len(results) > 1:
+        inferences.append("Multiple stored records support this answer; review the supporting records for nuance.")
+    missing = []
+    if not any(result.get("provenance") for result in results):
+        missing.append("Some supporting records do not yet have stored provenance.")
+    conversation_id = update_search_conversation(
+        db,
+        payload.conversation_id,
+        payload.query,
+        [{"type": result["type"], "title": result["title"]} for result in results],
+    )
+    db.commit()
+    return {
+        "query": payload.query,
+        "conversation_id": conversation_id,
+        "answer": answer,
+        "directly_supported_facts": direct_facts,
+        "inferences": inferences,
+        "missing_information": missing,
+        "results": results,
+    }
