@@ -16,6 +16,7 @@ const memoryTypes = [
   { key: 'sops', label: 'SOPs', titleField: 'title' },
   { key: 'documents', label: 'Documents', titleField: 'title' },
   { key: 'metrics', label: 'Metrics', titleField: 'title' },
+  { key: 'tasks', label: 'Tasks', titleField: 'title' },
 ];
 
 const app = document.getElementById('app');
@@ -139,6 +140,7 @@ function currentMemoryType() {
 function editableObjectAttributes(item) {
   const attributes = { ...item };
   delete attributes.id;
+  delete attributes.is_overdue;
   return attributes;
 }
 
@@ -478,6 +480,50 @@ function render() {
       });
     });
 
+    app.querySelectorAll('[data-complete-task]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (submitting) return;
+        const id = button.getAttribute('data-complete-task');
+        submitting = true;
+        render();
+        try {
+          await safeJsonFetch(apiUrl(`/tasks/${id}/complete`), { method: 'POST' });
+          memoryObjects = null;
+          memoryMessage = 'Task completed.';
+          briefing = null;
+          meetingPrep = null;
+          searchResults = null;
+        } catch (error) {
+          setApiError(error.message);
+        } finally {
+          submitting = false;
+        }
+        render();
+      });
+    });
+
+    app.querySelectorAll('[data-reopen-task]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (submitting) return;
+        const id = button.getAttribute('data-reopen-task');
+        submitting = true;
+        render();
+        try {
+          await safeJsonFetch(apiUrl(`/tasks/${id}/reopen`), { method: 'POST' });
+          memoryObjects = null;
+          memoryMessage = 'Task reopened.';
+          briefing = null;
+          meetingPrep = null;
+          searchResults = null;
+        } catch (error) {
+          setApiError(error.message);
+        } finally {
+          submitting = false;
+        }
+        render();
+      });
+    });
+
     app.querySelector('#memory-cancel')?.addEventListener('click', () => {
       memoryEdit = null;
       memoryMessage = '';
@@ -736,7 +782,11 @@ function renderPanel() {
                 <h3>${escapeHtml(item[selectedType.titleField] || `${selectedType.label} memory`)}</h3>
                 <p>${escapeHtml(item.company || item.status || item.type || item.value || 'Stored memory object')}</p>
               </div>
-              <button type="button" class="secondary" data-edit-object="${escapeHtml(item.id)}">Edit</button>
+              <div class="object-actions">
+                ${memoryType === 'tasks' && item.status !== 'completed' ? `<button type="button" class="secondary" data-complete-task="${escapeHtml(item.id)}">Complete</button>` : ''}
+                ${memoryType === 'tasks' && item.status === 'completed' ? `<button type="button" class="secondary" data-reopen-task="${escapeHtml(item.id)}">Reopen</button>` : ''}
+                <button type="button" class="secondary" data-edit-object="${escapeHtml(item.id)}">Edit</button>
+              </div>
             </article>
           `).join('') : '<p class="muted">No objects found for this type.</p>'}
         </div>

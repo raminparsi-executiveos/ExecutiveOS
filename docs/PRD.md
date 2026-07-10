@@ -9,6 +9,7 @@ ExecutiveOS helps leaders preserve important company context as structured memor
 - Capture natural-language updates and one or more screenshots.
 - Suggest structured memory updates for user approval.
 - Store approved updates as durable executive objects.
+- Track approved commitments and action items as first-class task records.
 - Generate a morning briefing from current memory.
 - Generate meeting prep from relevant company, project, people, decision, metric, meeting, and recent capture context.
 - Answer natural-language search questions with a direct answer and supporting records.
@@ -24,7 +25,7 @@ The user enters text or attaches one or more screenshots. The system extracts su
 
 ### Morning Briefing
 
-The system summarizes top priorities, active strategic issues, meetings today, open decisions, people needing attention, waiting-on items, risks, recent updates, and a recommended focus.
+The system summarizes top priorities, active strategic issues, meetings today, open decisions, people needing attention, open tasks, overdue tasks, waiting-on items, risks, recent updates, and a recommended focus.
 
 ### Meeting Prep
 
@@ -36,11 +37,11 @@ The user asks a question about executive memory. The system returns a direct ans
 
 ### Memory
 
-The user browses stored memory by object type, opens a record, edits its fields, or deletes incorrect memory.
+The user browses stored memory by object type, opens a record, edits its fields, completes or reopens tasks, or deletes incorrect memory.
 
 ## Non-Goals
 
-- Full task manager
+- Full project-management suite beyond executive action tracking
 - CRM replacement
 - Calendar replacement
 - Enterprise permissions
@@ -55,3 +56,5 @@ The user browses stored memory by object type, opens a record, edits its fields,
 - Meeting prep avoids pulling unrelated company context into unmatched sections.
 - Search scopes named-company queries to that company.
 - Auth misconfiguration is visible instead of failing silently.
+- Approved meeting action items create linked task records while preserving original meeting history.
+- Completed tasks no longer appear as open or waiting items but remain searchable and auditable.

@@ -3,7 +3,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .models import CaptureRecord, Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue
+from .models import CaptureRecord, Company, Decision, Document, Meeting, Metric, Person, Project, SOP, StrategicIssue, Task
+from .tasks import serialize_task
 
 OBJECT_MODEL_MAP = {
     "companies": Company,
@@ -15,6 +16,7 @@ OBJECT_MODEL_MAP = {
     "sops": SOP,
     "documents": Document,
     "metrics": Metric,
+    "tasks": Task,
 }
 
 
@@ -26,6 +28,8 @@ def _model_for_object_type(object_type: str):
 
 
 def _serialize_model(instance: Any) -> dict[str, Any]:
+    if isinstance(instance, Task):
+        return serialize_task(instance)
     return {
         column.name: getattr(instance, column.name)
         for column in instance.__table__.columns
@@ -95,11 +99,13 @@ def _search_intent_boost(model: type[Any], query: str) -> int:
     if tokens & {"risk", "risks"}:
         return 12 if model in {StrategicIssue, Project} else 0
     if tokens & {"action", "actions", "question", "questions"}:
-        return 12 if model is Meeting else 0
+        return 12 if model in {Meeting, Task} else 0
     if "happening" in tokens:
         return 20 if model is Company else 0
     if tokens & {"project", "projects", "initiative"}:
         return 8 if model is Project else 0
+    if tokens & {"task", "tasks", "commitment", "commitments", "overdue", "blocked", "waiting"}:
+        return 16 if model is Task else 0
     if "role" in tokens or "person" in tokens:
         return 8 if model is Person else 0
     if tokens & {"who", "owner", "owns"}:
@@ -128,12 +134,13 @@ SEARCH_CONFIG = {
     SOP: ("title", ["title", "company", "purpose", "owner", "current_process", "escalation_rules"]),
     Document: ("title", ["title", "type", "source", "summary", "linked_objects"]),
     Metric: ("title", ["title", "company", "value", "related_strategic_issue", "trend", "notes"]),
+    Task: ("title", ["title", "description", "company", "owner", "due_date", "status", "priority", "next_action", "blocked_by", "tags", "source_summary"]),
 }
 
 RESULT_TYPES = {
     Company: "company", Person: "person", StrategicIssue: "strategic_issue",
     Project: "project", Decision: "decision", Meeting: "meeting", SOP: "sop",
-    Document: "document", Metric: "metric",
+    Document: "document", Metric: "metric", Task: "task",
 }
 
 
@@ -167,6 +174,15 @@ def _result_summary(item: Any) -> str:
         details = [item.objective or item.status.capitalize() or "Project"]
         if item.owner:
             details.append(f"owned by {item.owner}")
+        if item.company:
+            details.append(item.company)
+        return " — ".join(details)
+    if isinstance(item, Task):
+        details = [item.status.replace("_", " ").capitalize() if item.status else "Task"]
+        if item.owner:
+            details.append(f"owned by {item.owner}")
+        if item.due_date:
+            details.append(f"due {item.due_date}")
         if item.company:
             details.append(item.company)
         return " — ".join(details)
@@ -237,6 +253,16 @@ def _answer_for_result(item: Any, query: str) -> str:
         return "; ".join(item.risks)
     if isinstance(item, Project) and ({"next", "step", "steps"} & tokens) and item.next_steps:
         return "; ".join(item.next_steps)
+    if isinstance(item, Task):
+        if tokens & {"who", "owner", "owns"} and item.owner:
+            return item.owner
+        if tokens & {"status", "blocked", "waiting"} and item.status:
+            return item.status
+        if tokens & {"when", "due", "date", "overdue"} and item.due_date:
+            return item.due_date
+        if tokens & {"next", "action"} and item.next_action:
+            return item.next_action
+        return _result_summary(item)
     if isinstance(item, Metric):
         if tokens & {"trend", "trending"} and item.trend:
             return item.trend
@@ -260,7 +286,18 @@ def _answer_for_ranked_items(items: list[Any], query: str) -> str:
         if values:
             return "; ".join(dict.fromkeys(values))
     if tokens & {"action", "actions"}:
-        values = [action for item in items if isinstance(item, Meeting) for action in (item.action_items or [])]
+        values = [
+            action for item in items if isinstance(item, Meeting) for action in (item.action_items or [])
+        ] + [
+            item.title for item in items if isinstance(item, Task) and item.status not in {"completed", "cancelled"}
+        ]
+        if values:
+            return "; ".join(dict.fromkeys(values))
+    if tokens & {"task", "tasks", "commitment", "commitments", "overdue", "blocked", "waiting"}:
+        values = [
+            f"{item.title} ({item.status})"
+            for item in items if isinstance(item, Task)
+        ]
         if values:
             return "; ".join(dict.fromkeys(values))
     if tokens & {"question", "questions"}:
@@ -353,4 +390,3 @@ def _company_is_explicitly_negated(text: str, company: str) -> bool:
     normalized = _normalize_company(company)
     aliases = [alias for alias, canonical in COMPANY_ALIASES.items() if canonical == normalized]
     return any(_mention_is_negated(text, match) for alias in aliases for match in _company_mentions(text, alias))
-

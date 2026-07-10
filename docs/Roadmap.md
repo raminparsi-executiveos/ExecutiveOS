@@ -39,12 +39,18 @@
 - Added operational response headers, health checks, and CORS configuration.
 - Added Alembic migration scaffolding and an initial schema migration.
 
+### Enhancement Roadmap Priority 1: Formal Task and Action Model
+
+- Added first-class task memory with explicit statuses, priorities, owners, due dates, source metadata, blockers, next actions, tags, review timestamps, and completion history.
+- Added task creation, editing, deletion, completion, and reopening through the API and Memory UI.
+- Converted approved capture commitments and meeting action items into task records while preserving original meeting action-item text.
+- Updated briefing, meeting prep, and search to include open task context and hide completed tasks from open/waiting views without deleting task history.
+
 ## Next Candidates
 
-- Move hosted deployments fully onto explicit migration execution instead of startup table creation.
-- Add first-class object editing in the frontend.
+- Continue Enhancement Roadmap Priority 2: ranked Today Dashboard.
 - Add import/export for memory backup.
 - Add richer linking between related objects.
-- Add calendar and email integrations for meeting context.
+- Add calendar and uploaded-document ingestion through the approved Integration Inbox scope.
 - Add per-company filters and memory browsing views.
 - Add observability for AI classification quality and fallback frequency.

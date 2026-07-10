@@ -10,7 +10,7 @@ The app ships five working workflows:
 2. **Morning Briefing**: review active priorities, strategic issues, meetings today, open decisions, risks, waiting-on items, and recent captures with company labels, including unresolved context beyond only the newest records.
 3. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures, including unresolved company context for general leadership reviews.
 4. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
-5. **Memory**: browse stored objects, edit their fields, or delete incorrect records.
+5. **Memory**: browse stored objects, edit their fields, complete or reopen tasks, or delete incorrect records.
 
 ## Tech Stack
 
@@ -105,7 +105,9 @@ Important endpoints:
 - `POST /meeting-prep`
 - `POST /search`
 
-Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, and `metrics`.
+Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
+
+Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` remain on the meeting record for audit, and linked task records are completed explicitly rather than by fuzzy text deletion.
 
 ## Testing and Build
 

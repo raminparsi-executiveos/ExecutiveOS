@@ -58,10 +58,14 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `POST` | `/objects/{object_type}` | Creates a stored object from validated attributes. |
 | `PATCH` | `/objects/{object_type}/{object_id}` | Updates validated fields on a stored object. |
 | `DELETE` | `/objects/{object_type}/{object_id}` | Deletes a stored object. |
+| `POST` | `/tasks/{task_id}/complete` | Marks a task complete and keeps it searchable. |
+| `POST` | `/tasks/{task_id}/reopen` | Reopens a completed or cancelled task. |
 | `POST` | `/meeting-prep` | Generates agenda and context for a meeting. |
 | `POST` | `/search` | Answers a natural-language question over memory. |
 
-Object types: `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, and `metrics`.
+Object types: `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
+
+Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
 
 ## Docker
 

@@ -425,6 +425,13 @@ select {
   color: #64748b;
 }
 
+.object-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .editor-panel {
   margin-top: 18px;
   padding-top: 18px;

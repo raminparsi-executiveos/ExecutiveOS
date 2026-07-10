@@ -10,7 +10,8 @@ from .memory import (
     _detect_positive_company,
     _normalize_company,
 )
-from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document
+from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document, Task
+from .tasks import ensure_tasks_for_meeting_action_items, upsert_task_from_update
 
 
 WAITING_ITEM_STOP_WORDS = {
@@ -44,17 +45,12 @@ def capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
     return action_tokens <= capture_tokens or len(matched) >= max(2, len(action_tokens) - 1)
 
 
-def _resolve_waiting_items_from_capture(db: Session, text: str) -> None:
-    for meeting in db.query(Meeting).all():
-        action_items = list(meeting.action_items or [])
-        unresolved = [
-            item for item in action_items
-            if not capture_resolves_waiting_item(text, item)
-        ]
-        if len(unresolved) != len(action_items):
-            meeting.action_items = unresolved
-            db.add(meeting)
-            db.flush()
+def _task_resolution_suggestions(db: Session, text: str) -> list[str]:
+    suggestions = []
+    for task in db.query(Task).filter(Task.status.in_(["open", "in_progress", "waiting", "blocked"])).all():
+        if capture_resolves_waiting_item(text, task.title):
+            suggestions.append(f"Review whether task #{task.id} should be marked complete: {task.title}")
+    return suggestions
 
 
 def _upsert_company(db: Session, name: str) -> Company:
@@ -185,6 +181,34 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
             "details": "Potential metric update.",
         })
 
+    task_match = re.search(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+will\s+(.+?)(?:[.!?]|$)",
+        text,
+    )
+    if task_match:
+        owner, action = (value.strip() if value else "" for value in task_match.groups())
+        due_date = ""
+        due_match = re.search(r"\s+by\s+(.+)$", action, flags=re.IGNORECASE)
+        if due_match:
+            due_date = due_match.group(1).strip()
+            action = action[:due_match.start()].strip()
+        action_title = f"{owner} will {action}"
+        if due_date:
+            action_title = f"{action_title} by {due_date}"
+        updates.append({
+            "type": "task",
+            "title": action_title,
+            "description": text.strip(),
+            "company": detected_company,
+            "owner": owner,
+            "due_date": due_date,
+            "status": "open",
+            "priority": "medium",
+            "source_type": "capture_text",
+            "source_summary": text.strip()[:500],
+            "details": "Potential action item or commitment.",
+        })
+
     if detected_name:
         updates.append({
             "type": "person",
@@ -242,9 +266,11 @@ def _classify_capture_text(
     if image_inputs:
         return [], ["Screenshot analysis requires a configured and available AI connection."], "image_unavailable"
     updates = _fallback_classify_capture_text(text)
-    follow_ups = [] if updates else [
+    follow_ups = _task_resolution_suggestions(db, text)
+    if not updates:
+        follow_ups.extend([
         "What person, company, project, decision, or metric should be saved from this update?"
-    ]
+        ])
     return updates, follow_ups, "local_fallback"
 
 
@@ -255,6 +281,7 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> bool:
         "sop": SOP,
         "document": Document,
         "metric": Metric,
+        "task": Task,
     }.get(update.get("type"))
     if not model:
         return False
@@ -352,6 +379,14 @@ def _apply_approved_updates(
                 if value not in (None, "", []):
                     setattr(decision, field, value)
             db.flush()
+        elif update_type == "task":
+            upsert_task_from_update(
+                db,
+                update,
+                default_company=update_company,
+                default_source_type="capture_text",
+                default_source_summary=text[:500],
+            )
         else:
             if update.get("details"):
                 detail_field = {
@@ -363,9 +398,13 @@ def _apply_approved_updates(
                 }.get(update_type)
                 if detail_field and not update.get(detail_field):
                     update = {**update, detail_field: update["details"]}
-            _apply_generic_update(db, update)
-
-    _resolve_waiting_items_from_capture(db, text)
+            handled = _apply_generic_update(db, update)
+            if handled and update_type == "meeting":
+                meeting_title = update.get("title")
+                if meeting_title:
+                    meeting = db.query(Meeting).filter(Meeting.title.ilike(meeting_title)).first()
+                    if meeting:
+                        ensure_tasks_for_meeting_action_items(db, meeting)
 
     db.add(CaptureRecord(
         raw_text=text,

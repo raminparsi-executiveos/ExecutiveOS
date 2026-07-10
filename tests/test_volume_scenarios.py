@@ -134,6 +134,12 @@ def test_capture_resolves_matching_waiting_on_item():
     before_waiting = [item['label'] for item in before['waiting_on_items']]
     assert 'Confirm Yeison working hours' in before_waiting
 
+    classified = client.post('/capture/classify', json={
+        'text': 'Yeison will work 15 hours per week at PEC through September.',
+    })
+    assert classified.status_code == 200
+    assert any('Confirm Yeison working hours' in follow_up for follow_up in classified.json()['follow_ups'])
+
     saved = client.post('/capture/confirm', json={
         'text': 'Yeison will work 15 hours per week at PEC through September.',
         'classification_source': 'ai',
@@ -146,8 +152,15 @@ def test_capture_resolves_matching_waiting_on_item():
     })
     assert saved.status_code == 200
 
-    after = client.get('/briefing').json()
-    after_waiting = [item['label'] for item in after['waiting_on_items']]
+    still_waiting = [item['label'] for item in client.get('/briefing').json()['waiting_on_items']]
+    assert 'Confirm Yeison working hours' in still_waiting
+
+    tasks = client.get('/objects/tasks').json()['items']
+    linked = next(task for task in tasks if task['title'] == 'Confirm Yeison working hours')
+    completed = client.post(f"/tasks/{linked['id']}/complete")
+    assert completed.status_code == 200
+
+    after_waiting = [item['label'] for item in client.get('/briefing').json()['waiting_on_items']]
     assert 'Confirm Yeison working hours' not in after_waiting
     assert 'Ask Avery for ERP timeline' in after_waiting
 
@@ -161,11 +174,9 @@ def test_briefing_hides_waiting_item_resolved_by_existing_memory():
             'Ask Avery for ERP timeline',
         ],
     })
-    create('people', {
-        'name': 'Yeison',
-        'company': 'PEC',
-        'current_priorities': ['Work 15 hours per week at PEC through September'],
-    })
+    tasks = client.get('/objects/tasks').json()['items']
+    linked = next(task for task in tasks if task['title'] == 'Confirm Yeison working hours')
+    assert client.post(f"/tasks/{linked['id']}/complete").status_code == 200
 
     briefing = client.get('/briefing').json()
     waiting = [item['label'] for item in briefing['waiting_on_items']]

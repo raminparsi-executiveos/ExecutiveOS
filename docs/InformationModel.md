@@ -15,6 +15,7 @@ ExecutiveOS stores executive memory as typed objects plus immutable capture hist
 | `SOP` | Operating process with purpose, owner, process details, escalation rules, and related projects. |
 | `Document` | Reference document metadata and summary. |
 | `Metric` | KPI or measurement with value, date, trend, and related issue. |
+| `Task` | Action item or commitment with owner, due date, status, priority, source metadata, blocker, next action, tags, completion history, and review timestamp. |
 | `CaptureRecord` | Raw confirmed capture text, classification source, saved count, and timestamp. |
 
 ## API Object Types
@@ -30,6 +31,16 @@ The object listing and creation endpoints use these path names:
 - `sops`
 - `documents`
 - `metrics`
+- `tasks`
+
+## Task Rules
+
+- Supported statuses are `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`.
+- Supported priorities are `critical`, `high`, `medium`, and `low`.
+- Completed and cancelled tasks remain stored, searchable, and auditable.
+- Overdue is derived from an ISO `due_date` when the task status is not completed or cancelled.
+- Meeting `action_items` are preserved on the meeting record, with linked task records created for workflow tracking.
+- Fuzzy text matching may suggest that a task should be reviewed, but linked tasks are cleared from open/waiting views only through explicit completion.
 
 ## Capture Rules
 
@@ -38,6 +49,7 @@ The object listing and creation endpoints use these path names:
 - Capture records preserve the confirmed input as audit and search context.
 - Screenshots are not persisted as images.
 - Approved structured values are authoritative when they conflict with heuristic text detection.
+- Approved commitments and action items may create task records after user review.
 
 ## Generated Outputs
 

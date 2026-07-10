@@ -49,8 +49,10 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Add API endpoints to update and delete stored memory objects.
 - [x] Add a Memory UI for browsing, editing, and deleting stored objects.
 - [x] Add company labels and color-coded chips to briefing lists.
-- [x] Resolve matching waiting-on items when Capture provides the missing information.
-- [x] Hide waiting-on items in Morning Briefing when existing memory already answers them.
+- [x] Convert approved commitments and meeting action items into first-class tasks.
+- [x] Complete and reopen tasks explicitly while preserving task history.
+- [x] Keep fuzzy waiting-item matches as review suggestions instead of deleting meeting action text.
+- [x] Hide completed tasks from open/waiting briefing sections.
 - [x] Reorganize Meeting Prep into agenda, action/risk/decision, and supporting-context sections.
 - [x] Include older unresolved priorities and active company context in Morning Briefing and Meeting Prep.
 - [x] Accept multiple screenshots in a single Capture classification request.
@@ -69,6 +71,7 @@ Representative workflows were exercised against the API and shipping frontend.
 | `Who owns PM quality?` | The direct answer is `Julio`. |
 | `Revenue is $2.4M, up 12% this quarter.` | Local preview proposes a Revenue metric with the full decimal value and trend. |
 | `We decided to pause the Atlas launch because compliance is not ready.` | Local preview preserves both the decision and its reasoning. |
+| `Kyle will send the revised client-retention plan by Friday.` | Local preview suggests a task owned by Kyle with the due-date phrase preserved for review. |
 
 ## Verification commands
 
