@@ -139,3 +139,44 @@ def test_search_includes_open_tasks_and_excludes_completed_actions():
     client.post(f'/tasks/{task_id}/complete')
     completed_search = client.post('/search', json={'query': 'What action items are open at RYSE?'}).json()
     assert 'Sam call volume referral partners' not in completed_search['answer']
+
+
+def test_capture_can_mark_existing_pricing_issue_resolved(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
+    issue = client.post('/objects/strategic-issues', json={'attributes': {
+        'title': 'Quote generator pricing issues',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'active',
+        'current_thinking': 'Pricing logic needs review.',
+    }})
+    assert issue.status_code == 200
+
+    before = client.get('/briefing').json()
+    assert 'Quote generator pricing issues' in [
+        item['title'] for section in ('needs_your_attention', 'top_priorities') for item in before[section]
+    ]
+
+    classified = client.post('/capture/classify', json={
+        'text': 'Mark quote generator pricing issues as resolved',
+    })
+    assert classified.status_code == 200
+    update = next(update for update in classified.json()['suggested_updates'] if update['type'] == 'strategic_issue')
+    assert update['title'] == 'Quote generator pricing issues'
+    assert update['status'] == 'resolved'
+
+    saved = client.post('/capture/confirm', json={
+        'text': 'Mark quote generator pricing issues as resolved',
+        'approved_updates': [update],
+        'classification_source': 'local_fallback',
+    })
+    assert saved.status_code == 200
+
+    after = client.get('/briefing').json()
+    visible_titles = [
+        item['title'] for section in ('needs_your_attention', 'top_priorities') for item in after[section]
+    ]
+    assert 'Quote generator pricing issues' not in visible_titles
+
+    stored = next(item for item in client.get('/objects/strategic-issues').json()['items'] if item['title'] == 'Quote generator pricing issues')
+    assert stored['status'] == 'resolved'

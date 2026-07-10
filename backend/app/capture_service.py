@@ -8,11 +8,12 @@ from .ai import SuggestedUpdate, analyze_capture
 from .memory import (
     _company_is_explicitly_negated,
     _detect_positive_company,
+    _match_score,
     _normalize_company,
 )
 from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document, Task
 from .roadmap_services import ensure_provenance, record_revision
-from .tasks import ensure_tasks_for_meeting_action_items, upsert_task_from_update
+from .tasks import OPEN_TASK_STATUSES, complete_task, ensure_tasks_for_meeting_action_items, upsert_task_from_update
 
 
 WAITING_ITEM_STOP_WORDS = {
@@ -21,6 +22,8 @@ WAITING_ITEM_STOP_WORDS = {
     "in", "is", "need", "needed", "of", "on", "out", "provide", "send",
     "share", "the", "to", "update", "waiting", "what", "when", "with",
 }
+
+RESOLUTION_WORDS = {"resolved", "complete", "completed", "done", "closed", "fixed"}
 
 
 def _normalized_tokens(text: str) -> set[str]:
@@ -44,6 +47,76 @@ def capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
     capture_tokens = _normalized_tokens(capture_text)
     matched = action_tokens & capture_tokens
     return action_tokens <= capture_tokens or len(matched) >= max(2, len(action_tokens) - 1)
+
+
+def _resolution_target_from_text(text: str) -> str:
+    match = re.search(
+        r"\b(?:mark|set)\s+(.+?)\s+as\s+(?:resolved|complete|completed|done|closed|fixed)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+    match = re.search(
+        r"\b(.+?)\s+(?:is|are|has been|have been)\s+(?:resolved|complete|completed|done|closed|fixed)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def _is_explicit_resolution(text: str) -> bool:
+    tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
+    return bool(tokens & RESOLUTION_WORDS) and bool(_resolution_target_from_text(text))
+
+
+def _matches_resolution_target(item: Any, fields: list[str], target: str) -> bool:
+    if not target:
+        return False
+    label = " ".join(str(getattr(item, field, "") or "") for field in fields)
+    if capture_resolves_waiting_item(target, label) or capture_resolves_waiting_item(label, target):
+        return True
+    return _match_score(item, fields, target) >= 6
+
+
+def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
+    target = _resolution_target_from_text(text)
+    if not target:
+        return []
+    suggestions: list[dict[str, Any]] = []
+    for task in db.query(Task).filter(Task.status.in_(OPEN_TASK_STATUSES)).all():
+        if _matches_resolution_target(task, ["title", "description", "source_summary"], target):
+            suggestions.append({
+                "type": "task",
+                "title": task.title,
+                "status": "completed",
+                "source_type": task.source_type,
+                "source_id": task.source_id,
+                "details": f"Mark existing task #{task.id} complete.",
+                "memory_classification": "commitment",
+                "verification_state": "user_confirmed",
+            })
+    for issue in db.query(StrategicIssue).filter(StrategicIssue.status == "active").all():
+        if _matches_resolution_target(issue, ["title", "current_thinking", "risks"], target):
+            suggestions.append({
+                "type": "strategic_issue",
+                "title": issue.title,
+                "status": "resolved",
+                "details": f"Mark existing strategic issue #{issue.id} resolved.",
+                "memory_classification": "confirmed_fact",
+                "verification_state": "user_confirmed",
+            })
+    for project in db.query(Project).filter(Project.status == "active").all():
+        if _matches_resolution_target(project, ["title", "objective", "risks", "next_steps"], target):
+            suggestions.append({
+                "type": "project",
+                "title": project.title,
+                "status": "completed",
+                "details": f"Mark existing project #{project.id} completed.",
+                "memory_classification": "confirmed_fact",
+                "verification_state": "user_confirmed",
+            })
+    return suggestions
 
 
 def _task_resolution_suggestions(db: Session, text: str) -> list[str]:
@@ -257,16 +330,17 @@ def _classify_capture_text(
     db: Session, text: str, image_data: str | list[str] = ""
 ) -> tuple[list[dict[str, Any]], list[str], str]:
     image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
+    resolution_updates = _resolution_suggestions(db, text) if _is_explicit_resolution(text) else []
     analysis = analyze_capture(text, _memory_context(db), image_inputs) if image_inputs else analyze_capture(text, _memory_context(db))
     if analysis:
         return (
-            [update.model_dump() for update in analysis.suggested_updates],
+            resolution_updates + [update.model_dump() for update in analysis.suggested_updates],
             analysis.follow_ups,
             "ai",
         )
     if image_inputs:
         return [], ["Screenshot analysis requires a configured and available AI connection."], "image_unavailable"
-    updates = _fallback_classify_capture_text(text)
+    updates = resolution_updates + _fallback_classify_capture_text(text)
     follow_ups = _task_resolution_suggestions(db, text)
     if not updates:
         follow_ups.extend([
