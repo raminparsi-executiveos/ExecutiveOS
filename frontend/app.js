@@ -109,9 +109,11 @@ function renderCompactItem(item) {
   return `
     <span class="item-with-company actionable-row ${hasControl ? 'has-control' : ''}">
       ${actionControlButton(item)}
-      ${renderCompanyChip(item.company)}
       <span class="actionable-copy">
-        <span>${escapeHtml(item.label)}</span>
+        <span class="actionable-title">
+          ${renderCompanyChip(item.company)}
+          <span>${escapeHtml(item.label)}</span>
+        </span>
         ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
       </span>
     </span>
@@ -122,22 +124,24 @@ function renderDashboardItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
   const hasControl = isCompletableTaskItem(item) || isResolvableItem(item);
   return `
-    <div class="dashboard-item">
-      <div class="dashboard-item-main ${hasControl ? 'has-control' : ''}">
-        ${actionControlButton(item)}
-        ${renderCompanyChip(item.company)}
-        <strong>${escapeHtml(item.title || item.label || 'Untitled item')}</strong>
-        ${item.score ? `<span class="score-pill">${escapeHtml(item.score)}</span>` : ''}
+    <div class="dashboard-item ${hasControl ? 'has-control' : ''}">
+      ${actionControlButton(item)}
+      <div class="dashboard-item-content">
+        <div class="dashboard-item-main">
+          ${renderCompanyChip(item.company)}
+          <strong>${escapeHtml(item.title || item.label || 'Untitled item')}</strong>
+          ${item.score ? `<span class="score-pill">${escapeHtml(item.score)}</span>` : ''}
+        </div>
+        <div class="dashboard-meta">
+          ${item.owner ? `<span>Owner: ${escapeHtml(item.owner)}</span>` : ''}
+          ${item.status ? `<span>${escapeHtml(humanize(item.status))}</span>` : ''}
+          ${item.due_date ? `<span>Due: ${escapeHtml(item.due_date)}</span>` : ''}
+        </div>
+        ${item.why_it_matters ? `<p>${escapeHtml(item.why_it_matters)}</p>` : ''}
+        ${item.recommended_next_action ? `<small>Next: ${escapeHtml(item.recommended_next_action)}</small>` : ''}
+        ${item.source?.summary ? `<small>Source: ${escapeHtml(item.source.summary)}</small>` : ''}
+        ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
       </div>
-      <div class="dashboard-meta">
-        ${item.owner ? `<span>Owner: ${escapeHtml(item.owner)}</span>` : ''}
-        ${item.status ? `<span>${escapeHtml(humanize(item.status))}</span>` : ''}
-        ${item.due_date ? `<span>Due: ${escapeHtml(item.due_date)}</span>` : ''}
-      </div>
-      ${item.why_it_matters ? `<p>${escapeHtml(item.why_it_matters)}</p>` : ''}
-      ${item.recommended_next_action ? `<small>Next: ${escapeHtml(item.recommended_next_action)}</small>` : ''}
-      ${item.source?.summary ? `<small>Source: ${escapeHtml(item.source.summary)}</small>` : ''}
-      ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
     </div>
   `;
 }

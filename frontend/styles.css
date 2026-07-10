@@ -298,15 +298,29 @@ select {
   gap: 5px;
 }
 
+.dashboard-item.has-control {
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+
+.dashboard-item-content {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
 .dashboard-item-main {
   display: grid;
   grid-template-columns: max-content 1fr max-content;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
-.dashboard-item-main.has-control {
-  grid-template-columns: max-content max-content 1fr max-content;
+.dashboard-item-main strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .item-action-button {
@@ -314,6 +328,7 @@ select {
   align-items: center;
   justify-content: center;
   min-height: 28px;
+  min-width: 92px;
   white-space: nowrap;
   border-radius: 999px;
   border: 1px solid #94a3b8;
@@ -341,18 +356,32 @@ select {
 
 .actionable-row {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
 
 .actionable-row.has-control {
-  grid-template-columns: max-content max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
 }
 
 .actionable-copy {
   display: grid;
+  min-width: 0;
   gap: 2px;
+}
+
+.actionable-title {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.actionable-title span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .actionable-copy small {
