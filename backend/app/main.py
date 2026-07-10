@@ -60,6 +60,7 @@ from .tasks import (
     OPEN_TASK_STATUSES,
     complete_task,
     ensure_tasks_for_meeting_action_items,
+    normalize_task_attributes,
     reopen_task,
     task_is_overdue,
     validate_task_attributes,
@@ -249,17 +250,18 @@ def list_objects(
 @app.post("/objects/{object_type}")
 def create_object(object_type: str, payload: CreateObjectRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     model = _model_for_object_type(object_type)
+    attributes = normalize_task_attributes(payload.attributes) if model is Task else dict(payload.attributes)
     valid_fields = {column.name for column in model.__table__.columns} - {"id"}
-    unknown_fields = sorted(set(payload.attributes) - valid_fields)
+    unknown_fields = sorted(set(attributes) - valid_fields)
     if unknown_fields:
         raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(unknown_fields)}")
     identity_field = "name" if "name" in valid_fields else "title"
-    if not str(payload.attributes.get(identity_field) or "").strip():
+    if not str(attributes.get(identity_field) or "").strip():
         raise HTTPException(status_code=422, detail=f"Missing required field: {identity_field}")
     if model is Task:
-        validate_task_attributes(payload.attributes)
+        validate_task_attributes(attributes)
     try:
-        instance = model(**payload.attributes)
+        instance = model(**attributes)
         db.add(instance)
         db.flush()
         if model is Meeting:
@@ -270,7 +272,7 @@ def create_object(object_type: str, payload: CreateObjectRequest, db: Session = 
             instance.id,
             source_type="manual_entry",
             source_title=f"Manual {object_type} entry",
-            source_excerpt=str(payload.attributes)[:1000],
+            source_excerpt=str(attributes)[:1000],
             created_by=_user,
         )
         record_revision(
@@ -302,23 +304,24 @@ def update_object(
     _user: str = Depends(require_auth),
 ):
     model = _model_for_object_type(object_type)
+    attributes = normalize_task_attributes(payload.attributes) if model is Task else dict(payload.attributes)
     valid_fields = {column.name for column in model.__table__.columns} - {"id"}
-    unknown_fields = sorted(set(payload.attributes) - valid_fields)
+    unknown_fields = sorted(set(attributes) - valid_fields)
     if unknown_fields:
         raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(unknown_fields)}")
     identity_field = "name" if "name" in valid_fields else "title"
-    if identity_field in payload.attributes and not str(payload.attributes.get(identity_field) or "").strip():
+    if identity_field in attributes and not str(attributes.get(identity_field) or "").strip():
         raise HTTPException(status_code=422, detail=f"Missing required field: {identity_field}")
     if model is Task:
-        validate_task_attributes(payload.attributes, partial=True)
+        validate_task_attributes(attributes, partial=True)
     instance = db.get(model, object_id)
     if not instance:
         raise HTTPException(status_code=404, detail="Object not found")
     try:
         before = _serialize_model(instance)
-        for field, value in payload.attributes.items():
+        for field, value in attributes.items():
             setattr(instance, field, value)
-        if model is Task and "status" in payload.attributes:
+        if model is Task and "status" in attributes:
             if instance.status == "completed":
                 complete_task(db, instance)
             elif instance.status in OPEN_TASK_STATUSES:

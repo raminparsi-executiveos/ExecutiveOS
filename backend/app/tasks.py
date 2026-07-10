@@ -13,7 +13,45 @@ TASK_PRIORITIES = {"critical", "high", "medium", "low"}
 OPEN_TASK_STATUSES = TASK_STATUSES - {"completed", "cancelled"}
 
 
+def _normalize_enum_value(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def normalize_task_status(value: Any) -> str:
+    normalized = _normalize_enum_value(value)
+    aliases = {
+        "": "open",
+        "todo": "open",
+        "to_do": "open",
+        "not_started": "open",
+        "canceled": "cancelled",
+        "cancelled": "cancelled",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def normalize_task_priority(value: Any) -> str:
+    normalized = _normalize_enum_value(value)
+    aliases = {
+        "": "medium",
+        "med": "medium",
+        "normal": "medium",
+        "urgent": "critical",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def normalize_task_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(attributes)
+    if "status" in normalized:
+        normalized["status"] = normalize_task_status(normalized["status"])
+    if "priority" in normalized:
+        normalized["priority"] = normalize_task_priority(normalized["priority"])
+    return normalized
+
+
 def validate_task_attributes(attributes: dict[str, Any], *, partial: bool = False) -> None:
+    attributes.update(normalize_task_attributes(attributes))
     if not partial and not str(attributes.get("title") or "").strip():
         raise HTTPException(status_code=422, detail="Missing required field: title")
     if "title" in attributes and not str(attributes.get("title") or "").strip():
@@ -119,6 +157,7 @@ def upsert_task_from_update(
     title = normalize_task_title(update.get("title") or update.get("details") or "")
     if not title:
         return None
+    update = normalize_task_attributes(update)
     status = update.get("status") or "open"
     priority = update.get("priority") or "medium"
     validate_task_attributes({"title": title, "status": status, "priority": priority})

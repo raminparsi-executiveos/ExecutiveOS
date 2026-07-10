@@ -94,6 +94,29 @@ def test_local_capture_suggests_and_saves_task_commitment(monkeypatch):
     assert any(task['title'] == 'Kyle will send the revised client-retention plan by Friday' for task in tasks)
 
 
+def test_capture_confirm_normalizes_task_status_and_priority_values():
+    saved = client.post('/capture/confirm', json={
+        'text': 'Morning sales meeting: Avery owns follow-up on open prospects.',
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'task',
+            'title': 'Avery follow up on open prospects',
+            'company': 'PEC',
+            'owner': 'Avery',
+            'status': 'Open',
+            'priority': 'Normal',
+            'source_type': 'capture_text',
+            'details': 'Captured from morning sales meeting.',
+        }],
+    })
+    assert saved.status_code == 200
+
+    tasks = client.get('/objects/tasks').json()['items']
+    task = next(item for item in tasks if item['title'] == 'Avery follow up on open prospects')
+    assert task['status'] == 'open'
+    assert task['priority'] == 'medium'
+
+
 def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions():
     meeting = client.post('/objects/meetings', json={'attributes': {
         'title': 'PEC client retention review',
