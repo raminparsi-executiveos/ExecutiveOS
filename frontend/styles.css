@@ -298,12 +298,6 @@ select {
   gap: 5px;
 }
 
-.dashboard-item.has-control {
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 10px;
-  align-items: start;
-}
-
 .dashboard-item-content {
   display: grid;
   min-width: 0;
@@ -328,7 +322,6 @@ select {
   align-items: center;
   justify-content: center;
   min-height: 28px;
-  min-width: 92px;
   white-space: nowrap;
   border-radius: 999px;
   border: 1px solid #94a3b8;
@@ -357,13 +350,7 @@ select {
 .actionable-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-}
-
-.actionable-row.has-control {
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 10px;
+  gap: 4px;
 }
 
 .actionable-copy {
@@ -386,6 +373,14 @@ select {
 
 .actionable-copy small {
   color: #64748b;
+}
+
+.item-action-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 3px;
+  min-width: 0;
 }
 
 .dashboard-item p {

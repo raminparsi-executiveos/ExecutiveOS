@@ -105,16 +105,16 @@ function renderCompactItem(item) {
     item.status ? humanize(item.status) : '',
     item.due_date ? `Due: ${item.due_date}` : '',
   ].filter(Boolean);
-  const hasControl = isCompletableTaskItem(item) || isResolvableItem(item);
+  const actionButton = actionControlButton(item);
   return `
-    <span class="item-with-company actionable-row ${hasControl ? 'has-control' : ''}">
-      ${actionControlButton(item)}
+    <span class="item-with-company actionable-row">
       <span class="actionable-copy">
         <span class="actionable-title">
           ${renderCompanyChip(item.company)}
           <span>${escapeHtml(item.label)}</span>
         </span>
         ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
+        ${actionButton ? `<span class="item-action-row">${actionButton}</span>` : ''}
       </span>
     </span>
   `;
@@ -122,10 +122,9 @@ function renderCompactItem(item) {
 
 function renderDashboardItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
-  const hasControl = isCompletableTaskItem(item) || isResolvableItem(item);
+  const actionButton = actionControlButton(item);
   return `
-    <div class="dashboard-item ${hasControl ? 'has-control' : ''}">
-      ${actionControlButton(item)}
+    <div class="dashboard-item">
       <div class="dashboard-item-content">
         <div class="dashboard-item-main">
           ${renderCompanyChip(item.company)}
@@ -141,6 +140,7 @@ function renderDashboardItem(item) {
         ${item.recommended_next_action ? `<small>Next: ${escapeHtml(item.recommended_next_action)}</small>` : ''}
         ${item.source?.summary ? `<small>Source: ${escapeHtml(item.source.summary)}</small>` : ''}
         ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+        ${actionButton ? `<div class="item-action-row">${actionButton}</div>` : ''}
       </div>
     </div>
   `;
