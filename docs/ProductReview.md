@@ -56,6 +56,9 @@ Representative workflows were exercised against the API and shipping frontend.
 - [x] Reorganize Meeting Prep into agenda, action/risk/decision, and supporting-context sections.
 - [x] Include older unresolved priorities and active company context in Morning Briefing and Meeting Prep.
 - [x] Accept multiple screenshots in a single Capture classification request.
+- [x] Rank Morning Briefing into needs-attention, delegation, overdue, blocked/waiting, changed, and upcoming sections.
+- [x] Explain each ranked briefing item with score reasons, source, owner, due date, why it matters, and next action.
+- [x] Track the previous briefing view so new or updated memory can appear in Changed Since Last Briefing.
 
 ## Sample acceptance scenarios
 
@@ -72,6 +75,7 @@ Representative workflows were exercised against the API and shipping frontend.
 | `Revenue is $2.4M, up 12% this quarter.` | Local preview proposes a Revenue metric with the full decimal value and trend. |
 | `We decided to pause the Atlas launch because compliance is not ready.` | Local preview preserves both the decision and its reasoning. |
 | `Kyle will send the revised client-retention plan by Friday.` | Local preview suggests a task owned by Kyle with the due-date phrase preserved for review. |
+| Critical overdue task owned by the executive | It appears first in Needs Your Attention with overdue and priority score reasons. |
 
 ## Verification commands
 

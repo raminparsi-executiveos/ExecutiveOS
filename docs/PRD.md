@@ -25,7 +25,7 @@ The user enters text or attaches one or more screenshots. The system extracts su
 
 ### Morning Briefing
 
-The system summarizes top priorities, active strategic issues, meetings today, open decisions, people needing attention, open tasks, overdue tasks, waiting-on items, risks, recent updates, and a recommended focus.
+The system ranks current executive memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item explains why it matters, owner, status, due date, next action, source, and score reasons.
 
 ### Meeting Prep
 
@@ -58,3 +58,4 @@ The user browses stored memory by object type, opens a record, edits its fields,
 - Auth misconfiguration is visible instead of failing silently.
 - Approved meeting action items create linked task records while preserving original meeting history.
 - Completed tasks no longer appear as open or waiting items but remain searchable and auditable.
+- Morning briefing does not simply sort by newest records; top recommendations expose ranking reasons and the next action.

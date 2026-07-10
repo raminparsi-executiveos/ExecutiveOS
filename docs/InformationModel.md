@@ -17,6 +17,7 @@ ExecutiveOS stores executive memory as typed objects plus immutable capture hist
 | `Metric` | KPI or measurement with value, date, trend, and related issue. |
 | `Task` | Action item or commitment with owner, due date, status, priority, source metadata, blocker, next action, tags, completion history, and review timestamp. |
 | `CaptureRecord` | Raw confirmed capture text, classification source, saved count, and timestamp. |
+| `BriefingView` | Per-user last briefing view timestamp used to compute changed-since-last-briefing sections. |
 
 ## API Object Types
 
@@ -54,3 +55,5 @@ The object listing and creation endpoints use these path names:
 ## Generated Outputs
 
 Briefings, meeting prep, and search answers are generated on demand from stored objects and capture history. They should not be treated as durable source-of-truth records.
+
+Morning Briefing ranked items include title, company, owner, why it matters, status, due date, recommended next action, supporting source, score, and score reasons. Scores are transparent derived values based on priority, due date, overdue duration, status, risks, missing owner, executive ownership, recent changes, and blocked/waiting state.

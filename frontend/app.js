@@ -66,10 +66,47 @@ function renderCompanyChip(company) {
 }
 
 function renderListItem(item) {
+  if (item && typeof item === 'object' && 'title' in item) {
+    return renderDashboardItem(item);
+  }
   if (item && typeof item === 'object' && 'label' in item) {
     return `<span class="item-with-company">${renderCompanyChip(item.company)}<span>${escapeHtml(item.label)}</span></span>`;
   }
   return escapeHtml(item);
+}
+
+function renderDashboardItem(item) {
+  const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
+  return `
+    <div class="dashboard-item">
+      <div class="dashboard-item-main">
+        ${renderCompanyChip(item.company)}
+        <strong>${escapeHtml(item.title || item.label || 'Untitled item')}</strong>
+        ${item.score ? `<span class="score-pill">${escapeHtml(item.score)}</span>` : ''}
+      </div>
+      <div class="dashboard-meta">
+        ${item.owner ? `<span>Owner: ${escapeHtml(item.owner)}</span>` : ''}
+        ${item.status ? `<span>${escapeHtml(humanize(item.status))}</span>` : ''}
+        ${item.due_date ? `<span>Due: ${escapeHtml(item.due_date)}</span>` : ''}
+      </div>
+      ${item.why_it_matters ? `<p>${escapeHtml(item.why_it_matters)}</p>` : ''}
+      ${item.recommended_next_action ? `<small>Next: ${escapeHtml(item.recommended_next_action)}</small>` : ''}
+      ${item.source?.summary ? `<small>Source: ${escapeHtml(item.source.summary)}</small>` : ''}
+      ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderBriefingSection(title, items, tone = '') {
+  return `
+    <article class="briefing-section ${tone}">
+      <div class="section-heading">
+        <h3>${escapeHtml(title)}</h3>
+        <span class="count-pill">${itemCount(items)}</span>
+      </div>
+      ${renderList(items)}
+    </article>
+  `;
 }
 
 function itemCount(items) {
@@ -735,15 +772,33 @@ function renderPanel() {
     }
 
     if (!briefing) return '<p>Loading briefing…</p>';
+    const commandSections = [
+      ['Needs Your Attention', briefing.needs_your_attention, 'needs-attention'],
+      ['Delegate or Follow Up', briefing.delegate_or_follow_up, 'delegate'],
+      ['Overdue', briefing.overdue, 'overdue'],
+      ['Blocked or Waiting', briefing.blocked_or_waiting, 'blocked'],
+      ['Changed Since Last Briefing', briefing.changed_since_last_briefing, 'changed'],
+      ['Upcoming', briefing.upcoming, 'upcoming'],
+    ];
+    const supportingSections = [
+      ['Top Priorities', briefing.top_priorities],
+      ['Strategic Issues', briefing.strategic_issues],
+      ['Meetings Today', briefing.meetings_today],
+      ['Open Decisions', briefing.open_decisions],
+      ['People Needing Attention', briefing.people_needing_attention],
+      ['Risks', briefing.risks],
+      ['Recent Updates', briefing.recent_updates],
+    ];
 
     return `
       <h2>Morning Briefing</h2>
-      <div class="briefing-grid">
-        ${Object.entries(briefing).filter(([key]) => key !== 'recommended_focus').map(([key, value]) => `
-          <article><h3>${escapeHtml(humanize(key))}</h3>${Array.isArray(value) ? renderList(value) : `<p>${escapeHtml(value)}</p>`}</article>
-        `).join('')}
-      </div>
       <aside class="focus"><strong>Recommended focus</strong><p>${escapeHtml(briefing.recommended_focus || 'Review the priorities above.')}</p></aside>
+      <div class="command-grid">
+        ${commandSections.map(([title, items, tone]) => renderBriefingSection(title, items || [], tone)).join('')}
+      </div>
+      <div class="briefing-grid supporting-briefing">
+        ${supportingSections.map(([title, items]) => renderBriefingSection(title, items || [])).join('')}
+      </div>
     `;
   }
 

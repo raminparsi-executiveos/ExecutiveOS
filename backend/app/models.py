@@ -179,3 +179,11 @@ class CaptureRecord(Base):
     classification_source = Column(String, default="unknown")
     saved_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class BriefingView(Base):
+    __tablename__ = "briefing_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    last_viewed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

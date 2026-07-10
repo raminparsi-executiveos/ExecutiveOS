@@ -49,7 +49,7 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `GET` | `/health` | Checks API and database availability. |
 | `GET` | `/auth/status` | Reports whether auth is required and configured. |
 | `POST` | `/auth/login` | Issues a bearer token. |
-| `GET` | `/briefing` | Returns current executive briefing sections. |
+| `GET` | `/briefing` | Returns ranked executive briefing sections and supporting memory context. |
 | `POST` | `/capture` | Classifies text and optionally saves suggested updates immediately. |
 | `POST` | `/capture/classify` | Classifies text and optional screenshot data for review. Supports `image_data` or up to 5 values in `image_data_list`. |
 | `POST` | `/capture/confirm` | Saves approved capture updates. |
@@ -66,6 +66,8 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 Object types: `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
 
 Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
+
+The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
 
 ## Docker
 

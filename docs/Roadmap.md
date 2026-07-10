@@ -46,9 +46,16 @@
 - Converted approved capture commitments and meeting action items into task records while preserving original meeting action-item text.
 - Updated briefing, meeting prep, and search to include open task context and hide completed tasks from open/waiting views without deleting task history.
 
+### Enhancement Roadmap Priority 2: Ranked Today Dashboard
+
+- Reworked Morning Briefing into ranked Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming sections.
+- Added transparent score reasons, source summaries, owners, due dates, statuses, why-it-matters copy, and recommended next actions for ranked items.
+- Added per-user briefing-view tracking so meaningful records changed after the prior briefing can be surfaced.
+- Updated the frontend briefing view into a compact executive command-center layout while preserving supporting memory sections.
+
 ## Next Candidates
 
-- Continue Enhancement Roadmap Priority 2: ranked Today Dashboard.
+- Continue Enhancement Roadmap Priority 3: provenance and source history.
 - Add import/export for memory backup.
 - Add richer linking between related objects.
 - Add calendar and uploaded-document ingestion through the approved Integration Inbox scope.
