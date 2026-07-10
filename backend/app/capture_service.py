@@ -97,10 +97,12 @@ def _matches_resolution_target(item: Any, fields: list[str], target: str) -> boo
 def _text_matches_resolution_target(value: str, target: str) -> bool:
     if not value or not target:
         return False
-    if capture_resolves_waiting_item(target, value) or capture_resolves_waiting_item(value, target):
-        return True
     value_tokens = _normalized_tokens(value)
     target_tokens = _normalized_tokens(target)
+    if len(value_tokens) == 1 and value_tokens == target_tokens:
+        return True
+    if capture_resolves_waiting_item(target, value) or capture_resolves_waiting_item(value, target):
+        return True
     matched = value_tokens & target_tokens
     return len(matched) >= max(2, min(len(value_tokens), len(target_tokens)) - 1)
 

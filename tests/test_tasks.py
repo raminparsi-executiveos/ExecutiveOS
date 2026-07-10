@@ -283,3 +283,38 @@ def test_briefing_hides_risk_resolved_by_mark_as_resolved_capture_variants():
             item['title'] for section in ('needs_your_attention', 'top_priorities') for item in briefing[section]
         ]
         assert 'Potential pricing inaccuracies if logic is not fully validated' not in visible_titles
+
+
+def test_capture_can_resolve_single_word_rework_item(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
+    created = client.post('/objects/strategic-issues', json={'attributes': {
+        'title': 'Quote generator cleanup',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'active',
+        'current_thinking': 'Cleanup after pricing review.',
+        'risks': ['Rework'],
+    }})
+    assert created.status_code == 200
+
+    before = client.get('/briefing').json()
+    assert 'Rework' in [item['title'] for item in before['needs_your_attention']]
+
+    classified = client.post('/capture/classify', json={'text': 'mark Rework as resolved'})
+    assert classified.status_code == 200
+    update = next(update for update in classified.json()['suggested_updates'] if update['type'] == 'strategic_issue')
+    assert update['title'] == 'Quote generator cleanup'
+    assert update['risks'] == []
+
+    saved = client.post('/capture/confirm', json={
+        'text': 'mark Rework as resolved',
+        'approved_updates': [update],
+        'classification_source': 'local_fallback',
+    })
+    assert saved.status_code == 200
+
+    after = client.get('/briefing').json()
+    visible_titles = [
+        item['title'] for section in ('needs_your_attention', 'top_priorities') for item in after[section]
+    ]
+    assert 'Rework' not in visible_titles
