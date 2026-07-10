@@ -254,3 +254,32 @@ def test_briefing_hides_longer_risk_resolved_by_recent_capture():
         item['title'] for section in ('needs_your_attention', 'top_priorities') for item in briefing[section]
     ]
     assert 'Potential pricing inaccuracies if logic is not fully validated' not in visible_titles
+
+
+def test_briefing_hides_risk_resolved_by_mark_as_resolved_capture_variants():
+    for raw_text in (
+        'Potential pricing inaccuracies if logic is not fully validated - mark as resolved',
+        'Mark as resolved: potential pricing inaccuracies',
+    ):
+        created = client.post('/objects/strategic-issues', json={'attributes': {
+            'title': f'Quote generator validation {raw_text[:8]}',
+            'company': 'PEC',
+            'owner': 'Ramin',
+            'status': 'active',
+            'current_thinking': 'Keep validating the pricing workflow.',
+            'risks': ['Potential pricing inaccuracies if logic is not fully validated'],
+        }})
+        assert created.status_code == 200
+
+        db = SessionLocal()
+        try:
+            db.add(CaptureRecord(raw_text=raw_text))
+            db.commit()
+        finally:
+            db.close()
+
+        briefing = client.get('/briefing').json()
+        visible_titles = [
+            item['title'] for section in ('needs_your_attention', 'top_priorities') for item in briefing[section]
+        ]
+        assert 'Potential pricing inaccuracies if logic is not fully validated' not in visible_titles

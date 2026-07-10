@@ -50,19 +50,34 @@ def capture_resolves_waiting_item(capture_text: str, action_item: str) -> bool:
 
 
 def _resolution_target_from_text(text: str) -> str:
+    resolution_pattern = r"(?:resolved|complete|completed|done|closed|fixed)"
     match = re.search(
-        r"\b(?:mark|set)\s+(.+?)\s+as\s+(?:resolved|complete|completed|done|closed|fixed)\b",
+        rf"\b(?:mark|set)\s+(.+?)\s+as\s+{resolution_pattern}\b",
         text,
         flags=re.IGNORECASE,
     )
     if match:
-        return match.group(1).strip()
+        return match.group(1).strip(" :-—–")
     match = re.search(
-        r"\b(.+?)\s+(?:is|are|has been|have been)\s+(?:resolved|complete|completed|done|closed|fixed)\b",
+        rf"\b(?:mark|set)\s+as\s+{resolution_pattern}\s*[:\-—–]\s*(.+)$",
         text,
         flags=re.IGNORECASE,
     )
-    return match.group(1).strip() if match else ""
+    if match:
+        return match.group(1).strip(" :-—–")
+    match = re.search(
+        rf"^(.+?)\s*[:\-—–]\s*(?:mark|set|marked)\s+as\s+{resolution_pattern}\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip(" :-—–")
+    match = re.search(
+        rf"\b(.+?)\s+(?:is|are|has been|have been)\s+{resolution_pattern}\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip(" :-—–") if match else ""
 
 
 def _is_explicit_resolution(text: str) -> bool:
