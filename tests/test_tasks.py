@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from app.main import app
 from app.database import SessionLocal
-from app.models import CaptureRecord
+from app.models import CaptureRecord, Meeting
 
 
 client = TestClient(app)
@@ -156,6 +156,48 @@ def test_briefing_and_meeting_prep_expose_completable_task_metadata():
     assert 'Ramin review PEC rework list' not in [
         item['label'] for item in refreshed['action_items_detail']
     ]
+
+
+def test_meeting_prep_exposes_resolve_metadata_for_non_task_items():
+    db = SessionLocal()
+    try:
+        db.add(Meeting(
+            title='PEC legacy prep review',
+            company='PEC',
+            action_items=['Confirm legacy worksheet cleanup'],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    issue = client.post('/objects/strategic-issues', json={'attributes': {
+        'title': 'PEC prep risk cleanup',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'active',
+        'current_thinking': 'Risk should be visible before it is resolved.',
+        'risks': ['Legacy worksheet rework'],
+    }})
+    assert issue.status_code == 200
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC legacy prep review'}).json()
+    legacy_action = next(item for item in prep['action_items_detail'] if item['label'] == 'Confirm legacy worksheet cleanup')
+    assert legacy_action['record_type'] == 'meeting_action'
+    assert legacy_action['resolvable'] is True
+
+    risk = next(item for item in prep['risks_detail'] if item['label'] == 'Legacy worksheet rework')
+    assert risk['record_type'] == 'risk'
+    assert risk['resolvable'] is True
+
+    resolved = client.post('/capture/confirm', json={
+        'text': 'Mark Legacy worksheet rework as resolved',
+        'approved_updates': [],
+        'classification_source': 'manual',
+    })
+    assert resolved.status_code == 200
+
+    refreshed = client.post('/meeting-prep', json={'meeting': 'PEC legacy prep review'}).json()
+    assert 'Legacy worksheet rework' not in [item['label'] for item in refreshed['risks_detail']]
 
 
 def test_search_includes_open_tasks_and_excludes_completed_actions():

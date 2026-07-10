@@ -81,10 +81,22 @@ function isCompletableTaskItem(item) {
   return Boolean(taskId) && !['completed', 'cancelled'].includes(status);
 }
 
-function completeTaskButton(item) {
+function isResolvableItem(item) {
+  const recordType = String(item?.record_type || '');
+  const status = String(item?.status || '').toLowerCase();
+  return !isCompletableTaskItem(item)
+    && !['completed', 'cancelled', 'resolved'].includes(status)
+    && (item?.resolvable || ['risk', 'meeting_action'].includes(recordType));
+}
+
+function actionControlButton(item) {
+  if (isResolvableItem(item)) {
+    const label = item.title || item.label || '';
+    return `<button type="button" class="item-action-button resolve-action" data-resolve-item="${escapeHtml(label)}" ${submitting ? 'disabled' : ''}>✓ Resolve</button>`;
+  }
   if (!isCompletableTaskItem(item)) return '';
   const taskId = item.task_id || item.record_id;
-  return `<button type="button" class="complete-task-button" data-complete-task="${escapeHtml(taskId)}" ${submitting ? 'disabled' : ''} aria-label="Mark ${escapeHtml(item.title || item.label || 'task')} complete">✓</button>`;
+  return `<button type="button" class="item-action-button complete-action" data-complete-task="${escapeHtml(taskId)}" ${submitting ? 'disabled' : ''}>✓ Complete</button>`;
 }
 
 function renderCompactItem(item) {
@@ -93,9 +105,10 @@ function renderCompactItem(item) {
     item.status ? humanize(item.status) : '',
     item.due_date ? `Due: ${item.due_date}` : '',
   ].filter(Boolean);
+  const hasControl = isCompletableTaskItem(item) || isResolvableItem(item);
   return `
-    <span class="item-with-company actionable-row ${isCompletableTaskItem(item) ? 'has-complete' : ''}">
-      ${completeTaskButton(item)}
+    <span class="item-with-company actionable-row ${hasControl ? 'has-control' : ''}">
+      ${actionControlButton(item)}
       ${renderCompanyChip(item.company)}
       <span class="actionable-copy">
         <span>${escapeHtml(item.label)}</span>
@@ -107,10 +120,11 @@ function renderCompactItem(item) {
 
 function renderDashboardItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
+  const hasControl = isCompletableTaskItem(item) || isResolvableItem(item);
   return `
     <div class="dashboard-item">
-      <div class="dashboard-item-main ${isCompletableTaskItem(item) ? 'has-complete' : ''}">
-        ${completeTaskButton(item)}
+      <div class="dashboard-item-main ${hasControl ? 'has-control' : ''}">
+        ${actionControlButton(item)}
         ${renderCompanyChip(item.company)}
         <strong>${escapeHtml(item.title || item.label || 'Untitled item')}</strong>
         ${item.score ? `<span class="score-pill">${escapeHtml(item.score)}</span>` : ''}
@@ -196,15 +210,16 @@ function renderMeetingPrepOutput(prep) {
   const actionItems = prepItems(prep, 'action_items_detail', 'action_items') || [];
   const openCommitments = prepItems(prep, 'open_commitments_detail', 'open_commitments') || [];
   const overdueTasks = prepItems(prep, 'overdue_tasks_detail', 'overdue_tasks') || [];
+  const risks = prepItems(prep, 'risks_detail', 'risks') || [];
   const contextCount = itemCount(prep.related_people) + itemCount(prep.related_strategic_issues)
     + itemCount(prep.related_projects) + itemCount(prep.open_decisions)
-    + itemCount(prep.metrics) + itemCount(prep.risks);
+    + itemCount(prep.metrics) + itemCount(risks);
   const commandSections = [
     { title: 'Proposed agenda', items: prep.agenda || [], tone: 'agenda', renderer: renderAgendaSection },
     { title: 'Action items', items: actionItems, tone: 'action', empty: 'No open action items.' },
     { title: 'Questions to ask', items: prep.questions_to_ask || [], tone: 'decision' },
     { title: 'Open decisions', items: prep.open_decisions || [], tone: 'decision', empty: 'No open decisions.' },
-    { title: 'Risks', items: prep.risks || [], tone: 'risk', empty: 'No risks found.' },
+    { title: 'Risks', items: risks, tone: 'risk', empty: 'No risks found.' },
     { title: 'Overdue tasks', items: overdueTasks, tone: 'risk' },
   ].filter((section) => section.title === 'Proposed agenda' || itemCount(section.items) > 0);
   const supportingSections = [
@@ -362,6 +377,45 @@ async function completeTaskFromControl(taskId) {
   render();
 }
 
+async function resolveItemFromControl(label) {
+  const title = String(label || '').trim();
+  if (!title || submitting) return;
+  submitting = true;
+  render();
+  try {
+    await safeJsonFetch(apiUrl('/capture/confirm'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: `Mark ${title} as resolved`,
+        approved_updates: [],
+        classification_source: 'manual',
+      }),
+    });
+    memoryObjects = null;
+    searchResults = null;
+    apiError = null;
+    if (active === 'briefing') {
+      briefing = null;
+    } else if (active === 'prep' && meetingPrep) {
+      const meeting = meetingQuery.trim() || meetingPrep.meeting || 'Executive meeting';
+      meetingPrep = await safeJsonFetch(apiUrl('/meeting-prep'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meeting }),
+      });
+    } else {
+      briefing = null;
+      meetingPrep = null;
+    }
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
 function render() {
   if (authState !== 'authenticated') {
     renderAuthentication();
@@ -393,6 +447,12 @@ function render() {
   app.querySelectorAll('[data-complete-task]').forEach((button) => {
     button.addEventListener('click', async () => {
       await completeTaskFromControl(button.getAttribute('data-complete-task'));
+    });
+  });
+
+  app.querySelectorAll('[data-resolve-item]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await resolveItemFromControl(button.getAttribute('data-resolve-item'));
     });
   });
 

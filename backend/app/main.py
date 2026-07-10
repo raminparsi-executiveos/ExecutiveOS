@@ -47,7 +47,12 @@ from .schemas import (
 )
 from .seed import seed_data
 from .briefing_service import build_ranked_briefing
-from .capture_service import _apply_approved_updates, _classify_capture_text
+from .capture_service import (
+    _apply_approved_updates,
+    _classify_capture_text,
+    capture_explicitly_resolves_item,
+    capture_resolves_waiting_item,
+)
 from .tasks import (
     OPEN_TASK_STATUSES,
     complete_task,
@@ -556,6 +561,16 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         )
         if task.status in OPEN_TASK_STATUSES
     ]
+    recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
+    resolution_contexts = [capture.raw_text for capture in recent_captures]
+
+    def action_is_resolved(action: str) -> bool:
+        return any(
+            capture_resolves_waiting_item(context, action)
+            or capture_explicitly_resolves_item(context, action)
+            for context in resolution_contexts
+        )
+
     capture_candidates = scoped_items(CaptureRecord)
     minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
     captures = _unique_captures([
@@ -567,10 +582,13 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         for person in db.query(Person).all()
         if any(re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE) for capture in captures)
     ]
-    action_items = list(dict.fromkeys(
+    action_items = [
+        item for item in list(dict.fromkeys(
         [task.title for task in tasks] +
         [item for meeting in meetings for item in (meeting.action_items or [])]
-    ))
+        ))
+        if not action_is_resolved(str(item))
+    ]
     task_by_title = {task.title.lower(): task for task in tasks}
     for meeting in meetings:
         for action_item in meeting.action_items or []:
@@ -588,7 +606,12 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
 
     def task_detail(title: str) -> dict[str, Any]:
         task = task_by_title.get(str(title).lower())
-        detail = {"label": title}
+        detail = {
+            "label": title,
+            "record_type": "meeting_action",
+            "status": "waiting",
+            "resolvable": True,
+        }
         if task:
             detail.update({
                 "type": "task",
@@ -599,10 +622,18 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
                 "owner": task.owner or "",
                 "status": task.status or "",
                 "due_date": task.due_date or "",
+                "resolvable": False,
             })
         return detail
 
-    risks = list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
+    risks = [
+        risk for risk in list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
+        if not action_is_resolved(str(risk))
+    ]
+    risk_details = [
+        {"label": risk, "record_type": "risk", "status": "active", "resolvable": True}
+        for risk in risks
+    ]
 
     def topical(labels: list[str]) -> list[str]:
         if not topic_query:
@@ -693,6 +724,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "action_items_detail": [task_detail(item) for item in action_items[:8]],
         "metrics": metric_summaries,
         "risks": risks[:5],
+        "risks_detail": risk_details[:5],
         "open_commitments_detail": open_commitment_details[:8],
         "overdue_tasks_detail": overdue_task_details[:8],
         **dynamic_sections,

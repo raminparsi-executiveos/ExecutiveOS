@@ -305,27 +305,38 @@ select {
   align-items: center;
 }
 
-.dashboard-item-main.has-complete {
+.dashboard-item-main.has-control {
   grid-template-columns: max-content max-content 1fr max-content;
 }
 
-.complete-task-button {
-  width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
+.item-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  white-space: nowrap;
   border-radius: 999px;
   border: 1px solid #94a3b8;
   background: #ffffff;
   color: #0f766e;
-  font-weight: 900;
+  font-size: 0.75rem;
+  font-weight: 800;
   line-height: 1;
-  padding: 0;
+  padding: 5px 9px;
 }
 
-.complete-task-button:hover:not(:disabled) {
+.item-action-button:hover:not(:disabled) {
   border-color: #0f766e;
   background: #ccfbf1;
+}
+
+.resolve-action {
+  color: #7c2d12;
+}
+
+.resolve-action:hover:not(:disabled) {
+  border-color: #ea580c;
+  background: #ffedd5;
 }
 
 .actionable-row {
@@ -335,7 +346,7 @@ select {
   align-items: start;
 }
 
-.actionable-row.has-complete {
+.actionable-row.has-control {
   grid-template-columns: max-content max-content 1fr;
 }
 
