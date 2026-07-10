@@ -218,6 +218,19 @@ def _unique_dashboard_items(items: list[dict[str, Any]], limit: int) -> list[dic
     return unique
 
 
+def _without_seen(items: list[dict[str, Any]], seen: set[tuple[str, Any, str]], limit: int) -> list[dict[str, Any]]:
+    selected = []
+    for item in _unique_dashboard_items(items, len(items)):
+        identity = (item["record_type"], item.get("record_id"), item["title"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        selected.append(item)
+        if len(selected) == limit:
+            break
+    return selected
+
+
 def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     today = now.date()
@@ -234,7 +247,6 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     tasks = db.query(Task).order_by(Task.id.desc()).all()
     metrics = db.query(Metric).order_by(Metric.id.desc()).all()
     open_tasks = [task for task in tasks if task.status in OPEN_TASK_STATUSES]
-    task_items = [_task_item(task, today, username) for task in open_tasks]
 
     recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
     resolution_contexts = [capture.raw_text for capture in recent_captures]
@@ -252,6 +264,16 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
 
     def action_is_resolved(action: str) -> bool:
         return any(capture_resolves_waiting_item(context, action) for context in resolution_contexts)
+
+    visible_open_tasks = [
+        task for task in open_tasks
+        if not (
+            task.source_type == "meeting"
+            and task.status in {"waiting", "blocked", "open"}
+            and action_is_resolved(task.title)
+        )
+    ]
+    task_items = [_task_item(task, today, username) for task in visible_open_tasks]
 
     legacy_waiting = [
         _dashboard_item(
@@ -313,12 +335,17 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     needs_attention = [
         item for item in task_items
         if item["score"] >= 85 or not item["owner"] or _is_executive_owner(item["owner"], username)
+        if item["status"] not in {"blocked", "waiting"}
     ] + overdue_decisions + risk_items[:5]
     delegate_follow_up = [
         item for item in task_items
         if item["owner"] and not _is_executive_owner(item["owner"], username) and item["status"] not in {"blocked", "waiting"}
     ]
-    overdue = [item for item in task_items if task_is_overdue(next(task for task in open_tasks if task.id == item["record_id"]), today)] + overdue_decisions
+    visible_task_by_id = {task.id: task for task in visible_open_tasks}
+    overdue = [
+        item for item in task_items
+        if item["record_id"] in visible_task_by_id and task_is_overdue(visible_task_by_id[item["record_id"]], today)
+    ] + overdue_decisions
     blocked_waiting = [
         item for item in task_items
         if item["status"] in {"blocked", "waiting"} or any("blocked" in reason for reason in item["score_reasons"])
@@ -372,12 +399,21 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
             "capture": list(recent_captures),
         }.items():
             for item in items:
-                changed_at = _updated_at(item)
-                if changed_at and changed_at > previous_viewed_at:
-                    changed_since_last.append(_changed_item(item, record_type))
+                    if isinstance(item, Task) and item.status not in OPEN_TASK_STATUSES:
+                        continue
+                    changed_at = _updated_at(item)
+                    if changed_at and changed_at > previous_viewed_at:
+                        changed_since_last.append(_changed_item(item, record_type))
 
     waiting_on = blocked_waiting
-    priorities = _unique_dashboard_items(needs_attention + delegate_follow_up + context_priorities, 8)
+    seen_sections: set[tuple[str, Any, str]] = set()
+    needs_your_attention = _without_seen(needs_attention, seen_sections, 4)
+    delegate_or_follow_up = _without_seen(delegate_follow_up, seen_sections, 4)
+    overdue_section = _without_seen(overdue, seen_sections, 4)
+    blocked_or_waiting = _without_seen(blocked_waiting, seen_sections, 4)
+    changed_section = _without_seen(changed_since_last, seen_sections, 4)
+    upcoming_section = _without_seen(upcoming, seen_sections, 4)
+    priorities = _unique_dashboard_items(needs_attention + delegate_follow_up + context_priorities, 6)
     focus = priorities[0]["title"] if priorities else "Capture the most important current context"
 
     if not view:
@@ -390,12 +426,12 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     return {
         "generated_at": now.isoformat(),
         "previous_viewed_at": previous_viewed_at.isoformat() if previous_viewed_at else "",
-        "needs_your_attention": _unique_dashboard_items(needs_attention, 8),
-        "delegate_or_follow_up": _unique_dashboard_items(delegate_follow_up, 8),
-        "overdue": _unique_dashboard_items(overdue, 8),
-        "blocked_or_waiting": _unique_dashboard_items(blocked_waiting, 8),
-        "changed_since_last_briefing": _unique_dashboard_items(changed_since_last, 8),
-        "upcoming": _unique_dashboard_items(upcoming, 8),
+        "needs_your_attention": needs_your_attention,
+        "delegate_or_follow_up": delegate_or_follow_up,
+        "overdue": overdue_section,
+        "blocked_or_waiting": blocked_or_waiting,
+        "changed_since_last_briefing": changed_section,
+        "upcoming": upcoming_section,
         "top_priorities": priorities,
         "strategic_issues": [{"label": issue.title, "company": issue.company or ""} for issue in issues[:8]],
         "meetings_today": [{"label": meeting.title, "company": meeting.company or ""} for meeting in meetings_today],
@@ -418,7 +454,7 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
                 "status": task.status,
                 "due_date": task.due_date or "",
             }
-            for task in open_tasks[:8]
+            for task in visible_open_tasks[:8]
         ],
         "overdue_tasks": [
             {
@@ -428,7 +464,7 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
                 "status": task.status,
                 "due_date": task.due_date or "",
             }
-            for task in open_tasks
+            for task in visible_open_tasks
             if task_is_overdue(task, today)
         ][:8],
         "risks": [{"label": item["title"], "company": item["company"]} for item in risk_items[:8]],

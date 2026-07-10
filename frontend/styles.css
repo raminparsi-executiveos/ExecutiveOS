@@ -240,7 +240,29 @@ select {
 }
 
 .supporting-briefing {
-  margin-top: 14px;
+  margin-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+.supporting-briefing > summary,
+.briefing-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.supporting-briefing > .briefing-grid {
+  margin-top: 12px;
+}
+
+.briefing-details {
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
 }
 
 .briefing-grid article, .command-grid article, .results article {
@@ -273,7 +295,7 @@ select {
 
 .dashboard-item {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .dashboard-item-main {
@@ -289,6 +311,7 @@ select {
 
 .dashboard-item small {
   color: #475569;
+  line-height: 1.35;
 }
 
 .dashboard-meta,

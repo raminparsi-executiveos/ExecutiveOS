@@ -109,6 +109,15 @@ function renderBriefingSection(title, items, tone = '') {
   `;
 }
 
+function renderCollapsedBriefingSection(title, items) {
+  return `
+    <details class="briefing-details">
+      <summary><span>${escapeHtml(title)}</span><span class="count-pill">${itemCount(items)}</span></summary>
+      ${renderList(items)}
+    </details>
+  `;
+}
+
 function itemCount(items) {
   return Array.isArray(items) ? items.length : 0;
 }
@@ -785,7 +794,7 @@ function renderPanel() {
       ['Blocked or Waiting', briefing.blocked_or_waiting, 'blocked'],
       ['Changed Since Last Briefing', briefing.changed_since_last_briefing, 'changed'],
       ['Upcoming', briefing.upcoming, 'upcoming'],
-    ];
+    ].filter(([, items]) => itemCount(items) > 0);
     const supportingSections = [
       ['Top Priorities', briefing.top_priorities],
       ['Strategic Issues', briefing.strategic_issues],
@@ -800,11 +809,14 @@ function renderPanel() {
       <h2>Morning Briefing</h2>
       <aside class="focus"><strong>Recommended focus</strong><p>${escapeHtml(briefing.recommended_focus || 'Review the priorities above.')}</p></aside>
       <div class="command-grid">
-        ${commandSections.map(([title, items, tone]) => renderBriefingSection(title, items || [], tone)).join('')}
+        ${commandSections.length ? commandSections.map(([title, items, tone]) => renderBriefingSection(title, items || [], tone)).join('') : '<p class="muted">Nothing urgent needs attention right now.</p>'}
       </div>
-      <div class="briefing-grid supporting-briefing">
-        ${supportingSections.map(([title, items]) => renderBriefingSection(title, items || [])).join('')}
-      </div>
+      <details class="supporting-briefing">
+        <summary><span>Supporting context</span><span class="count-pill">${supportingSections.reduce((count, [, items]) => count + itemCount(items), 0)}</span></summary>
+        <div class="briefing-grid">
+          ${supportingSections.map(([title, items]) => renderCollapsedBriefingSection(title, items || [])).join('')}
+        </div>
+      </details>
     `;
   }
 

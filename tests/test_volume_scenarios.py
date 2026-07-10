@@ -152,11 +152,12 @@ def test_capture_resolves_matching_waiting_on_item():
     })
     assert saved.status_code == 200
 
-    still_waiting = [item['label'] for item in client.get('/briefing').json()['waiting_on_items']]
-    assert 'Confirm Yeison working hours' in still_waiting
+    likely_resolved_waiting = [item['label'] for item in client.get('/briefing').json()['waiting_on_items']]
+    assert 'Confirm Yeison working hours' not in likely_resolved_waiting
 
     tasks = client.get('/objects/tasks').json()['items']
     linked = next(task for task in tasks if task['title'] == 'Confirm Yeison working hours')
+    assert linked['status'] == 'waiting'
     completed = client.post(f"/tasks/{linked['id']}/complete")
     assert completed.status_code == 200
 

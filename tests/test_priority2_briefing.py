@@ -102,8 +102,13 @@ def test_briefing_tracks_blocked_waiting_and_upcoming_items():
     assert 'blocked dependency' in blocked['score_reasons']
     assert 'Need staffing numbers' in blocked['why_it_matters']
 
+    visible_follow_up_titles = [
+        item['title']
+        for section in ('delegate_or_follow_up', 'upcoming')
+        for item in briefing[section]
+    ]
+    assert 'Send MyndLog backup plan' in visible_follow_up_titles
     upcoming_titles = [item['title'] for item in briefing['upcoming']]
-    assert 'Send MyndLog backup plan' in upcoming_titles
     assert 'Review EverPole pricing' in upcoming_titles
 
 
@@ -122,5 +127,9 @@ def test_changed_since_last_briefing_uses_previous_view_timestamp():
 
     second = client.get('/briefing').json()
     assert second['previous_viewed_at']
-    changed_titles = [item['title'] for item in second['changed_since_last_briefing']]
-    assert 'New PEC dashboard follow-up' in changed_titles
+    visible_titles = [
+        item['title']
+        for section in ('needs_your_attention', 'delegate_or_follow_up', 'changed_since_last_briefing')
+        for item in second[section]
+    ]
+    assert 'New PEC dashboard follow-up' in visible_titles
