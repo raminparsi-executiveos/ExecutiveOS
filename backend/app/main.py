@@ -571,6 +571,37 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         [task.title for task in tasks] +
         [item for meeting in meetings for item in (meeting.action_items or [])]
     ))
+    task_by_title = {task.title.lower(): task for task in tasks}
+    for meeting in meetings:
+        for action_item in meeting.action_items or []:
+            task = (
+                db.query(Task)
+                .filter(
+                    Task.title.ilike(str(action_item)),
+                    Task.source_type == "meeting",
+                    Task.source_id == str(meeting.id or ""),
+                )
+                .first()
+            )
+            if task and task.status in OPEN_TASK_STATUSES:
+                task_by_title.setdefault(task.title.lower(), task)
+
+    def task_detail(title: str) -> dict[str, Any]:
+        task = task_by_title.get(str(title).lower())
+        detail = {"label": title}
+        if task:
+            detail.update({
+                "type": "task",
+                "task_id": task.id,
+                "record_type": "task",
+                "record_id": task.id,
+                "company": task.company or "",
+                "owner": task.owner or "",
+                "status": task.status or "",
+                "due_date": task.due_date or "",
+            })
+        return detail
+
     risks = list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
 
     def topical(labels: list[str]) -> list[str]:
@@ -599,6 +630,12 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     ]
     overdue_tasks = [task.title for task in tasks if task_is_overdue(task)]
     open_commitments = [task.title for task in tasks if task.status in OPEN_TASK_STATUSES]
+    overdue_task_details = [
+        task_detail(task.title) for task in tasks if task_is_overdue(task)
+    ]
+    open_commitment_details = [
+        task_detail(task.title) for task in tasks if task.status in OPEN_TASK_STATUSES
+    ]
     people_context = [
         f"{person.name}: {person.role or 'No role'}{f' ({person.company})' if person.company else ''}"
         for person in people
@@ -653,8 +690,11 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
         "recent_capture_context": [_result_summary(capture) for capture in captures],
         "action_items": action_items[:8],
+        "action_items_detail": [task_detail(item) for item in action_items[:8]],
         "metrics": metric_summaries,
         "risks": risks[:5],
+        "open_commitments_detail": open_commitment_details[:8],
+        "overdue_tasks_detail": overdue_task_details[:8],
         **dynamic_sections,
     }
 

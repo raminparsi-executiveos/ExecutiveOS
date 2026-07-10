@@ -458,6 +458,9 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
         "open_tasks": [
             {
                 "label": task.title,
+                "record_type": "task",
+                "record_id": task.id,
+                "task_id": task.id,
                 "company": task.company or "",
                 "owner": task.owner or "",
                 "status": task.status,
@@ -468,6 +471,9 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
         "overdue_tasks": [
             {
                 "label": task.title,
+                "record_type": "task",
+                "record_id": task.id,
+                "task_id": task.id,
                 "company": task.company or "",
                 "owner": task.owner or "",
                 "status": task.status,

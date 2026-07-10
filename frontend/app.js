@@ -42,9 +42,9 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function renderList(items, emptyMessage = 'Nothing needs attention right now.') {
+function renderList(items, emptyMessage = 'Nothing needs attention right now.', renderer = renderListItem) {
   if (!items?.length) return `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
-  return `<ul>${items.map((item) => `<li>${renderListItem(item)}</li>`).join('')}</ul>`;
+  return `<ul>${items.map((item) => `<li>${renderer(item)}</li>`).join('')}</ul>`;
 }
 
 function humanize(value) {
@@ -70,16 +70,47 @@ function renderListItem(item) {
     return renderDashboardItem(item);
   }
   if (item && typeof item === 'object' && 'label' in item) {
-    return `<span class="item-with-company">${renderCompanyChip(item.company)}<span>${escapeHtml(item.label)}</span></span>`;
+    return renderCompactItem(item);
   }
   return escapeHtml(item);
+}
+
+function isCompletableTaskItem(item) {
+  const taskId = item?.task_id || (item?.record_type === 'task' ? item?.record_id : '');
+  const status = String(item?.status || '').toLowerCase();
+  return Boolean(taskId) && !['completed', 'cancelled'].includes(status);
+}
+
+function completeTaskButton(item) {
+  if (!isCompletableTaskItem(item)) return '';
+  const taskId = item.task_id || item.record_id;
+  return `<button type="button" class="complete-task-button" data-complete-task="${escapeHtml(taskId)}" ${submitting ? 'disabled' : ''} aria-label="Mark ${escapeHtml(item.title || item.label || 'task')} complete">✓</button>`;
+}
+
+function renderCompactItem(item) {
+  const meta = [
+    item.owner ? `Owner: ${item.owner}` : '',
+    item.status ? humanize(item.status) : '',
+    item.due_date ? `Due: ${item.due_date}` : '',
+  ].filter(Boolean);
+  return `
+    <span class="item-with-company actionable-row ${isCompletableTaskItem(item) ? 'has-complete' : ''}">
+      ${completeTaskButton(item)}
+      ${renderCompanyChip(item.company)}
+      <span class="actionable-copy">
+        <span>${escapeHtml(item.label)}</span>
+        ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
+      </span>
+    </span>
+  `;
 }
 
 function renderDashboardItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
   return `
     <div class="dashboard-item">
-      <div class="dashboard-item-main">
+      <div class="dashboard-item-main ${isCompletableTaskItem(item) ? 'has-complete' : ''}">
+        ${completeTaskButton(item)}
         ${renderCompanyChip(item.company)}
         <strong>${escapeHtml(item.title || item.label || 'Untitled item')}</strong>
         ${item.score ? `<span class="score-pill">${escapeHtml(item.score)}</span>` : ''}
@@ -134,6 +165,10 @@ function renderPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothi
   `;
 }
 
+function prepItems(prep, detailKey, fallbackKey) {
+  return prep[detailKey]?.length ? prep[detailKey] : prep[fallbackKey];
+}
+
 function renderMeetingPrepOutput(prep) {
   const contextCount = itemCount(prep.related_people) + itemCount(prep.related_strategic_issues)
     + itemCount(prep.related_projects) + itemCount(prep.open_decisions)
@@ -162,15 +197,15 @@ function renderMeetingPrepOutput(prep) {
           </ol>
         </section>
         <section class="prep-stack">
-          ${renderPrepSection('Action items', prep.action_items, 'action', 'No open action items.')}
+          ${renderPrepSection('Action items', prepItems(prep, 'action_items_detail', 'action_items'), 'action', 'No open action items.')}
           ${renderPrepSection('Risks', prep.risks, 'risk', 'No risks found.')}
           ${renderPrepSection('Open decisions', prep.open_decisions, 'decision', 'No open decisions.')}
         </section>
       </div>
       <div class="prep-grid">
         ${renderPrepSection('Questions to ask', prep.questions_to_ask, 'decision')}
-        ${renderPrepSection('Open commitments', prep.open_commitments, 'action')}
-        ${renderPrepSection('Overdue tasks', prep.overdue_tasks, 'risk')}
+        ${renderPrepSection('Open commitments', prepItems(prep, 'open_commitments_detail', 'open_commitments'), 'action')}
+        ${renderPrepSection('Overdue tasks', prepItems(prep, 'overdue_tasks_detail', 'overdue_tasks'), 'risk')}
         ${renderPrepSection('Conflicts or contradictions', prep.conflicts_or_contradictions, 'risk')}
         ${renderPrepSection('People', prep.related_people, 'people')}
         ${renderPrepSection('Strategic issues', prep.related_strategic_issues, 'issue')}
@@ -266,6 +301,37 @@ async function loadMemoryObjects() {
   }
 }
 
+async function completeTaskFromControl(taskId) {
+  if (!taskId || submitting) return;
+  submitting = true;
+  render();
+  try {
+    await safeJsonFetch(apiUrl(`/tasks/${taskId}/complete`), { method: 'POST' });
+    memoryObjects = null;
+    searchResults = null;
+    apiError = null;
+    if (active === 'briefing') {
+      briefing = null;
+    } else if (active === 'prep' && meetingPrep) {
+      const meeting = meetingQuery.trim() || meetingPrep.meeting || 'Executive meeting';
+      meetingPrep = await safeJsonFetch(apiUrl('/meeting-prep'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meeting }),
+      });
+    } else {
+      briefing = null;
+      meetingPrep = null;
+    }
+    memoryMessage = active === 'memory' ? 'Task completed.' : '';
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
 function render() {
   if (authState !== 'authenticated') {
     renderAuthentication();
@@ -291,6 +357,12 @@ function render() {
       if (nextSection === 'briefing' && nextSection !== active) briefing = null;
       active = nextSection;
       render();
+    });
+  });
+
+  app.querySelectorAll('[data-complete-task]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await completeTaskFromControl(button.getAttribute('data-complete-task'));
     });
   });
 
@@ -528,28 +600,6 @@ function render() {
           text: JSON.stringify(editableObjectAttributes(item), null, 2),
         };
         memoryMessage = '';
-        render();
-      });
-    });
-
-    app.querySelectorAll('[data-complete-task]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        if (submitting) return;
-        const id = button.getAttribute('data-complete-task');
-        submitting = true;
-        render();
-        try {
-          await safeJsonFetch(apiUrl(`/tasks/${id}/complete`), { method: 'POST' });
-          memoryObjects = null;
-          memoryMessage = 'Task completed.';
-          briefing = null;
-          meetingPrep = null;
-          searchResults = null;
-        } catch (error) {
-          setApiError(error.message);
-        } finally {
-          submitting = false;
-        }
         render();
       });
     });

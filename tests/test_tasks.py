@@ -124,6 +124,40 @@ def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions()
     ]
 
 
+def test_briefing_and_meeting_prep_expose_completable_task_metadata():
+    task_response = client.post('/objects/tasks', json={'attributes': {
+        'title': 'Ramin review PEC rework list',
+        'company': 'PEC',
+        'owner': 'Ramin',
+        'status': 'open',
+        'priority': 'high',
+    }})
+    assert task_response.status_code == 200
+    task_id = task_response.json()['object']['id']
+
+    briefing = client.get('/briefing').json()
+    briefing_item = next(item for item in briefing['needs_your_attention'] if item['title'] == 'Ramin review PEC rework list')
+    assert briefing_item['record_type'] == 'task'
+    assert briefing_item['record_id'] == task_id
+
+    legacy_task_item = next(item for item in briefing['open_tasks'] if item['label'] == 'Ramin review PEC rework list')
+    assert legacy_task_item['record_type'] == 'task'
+    assert legacy_task_item['task_id'] == task_id
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC rework meeting'}).json()
+    detail = next(item for item in prep['action_items_detail'] if item['label'] == 'Ramin review PEC rework list')
+    assert detail['task_id'] == task_id
+    assert detail['status'] == 'open'
+
+    completed = client.post(f'/tasks/{task_id}/complete')
+    assert completed.status_code == 200
+
+    refreshed = client.post('/meeting-prep', json={'meeting': 'PEC rework meeting'}).json()
+    assert 'Ramin review PEC rework list' not in [
+        item['label'] for item in refreshed['action_items_detail']
+    ]
+
+
 def test_search_includes_open_tasks_and_excludes_completed_actions():
     created = client.post('/objects/tasks', json={'attributes': {
         'title': 'Sam call volume referral partners',
