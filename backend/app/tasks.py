@@ -14,23 +14,35 @@ OPEN_TASK_STATUSES = TASK_STATUSES - {"completed", "cancelled"}
 
 
 def _normalize_enum_value(value: Any) -> str:
-    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    return normalized.strip("_")
 
 
-def normalize_task_status(value: Any) -> str:
+def normalize_task_status(value: Any, *, fallback_unknown: bool = False) -> str:
     normalized = _normalize_enum_value(value)
     aliases = {
         "": "open",
+        "active": "open",
         "todo": "open",
         "to_do": "open",
         "not_started": "open",
+        "pending": "waiting",
+        "pending_approval": "waiting",
+        "pending_leadership_approval": "waiting",
+        "proposed": "waiting",
+        "proposed_pending_approval": "waiting",
+        "proposed_pending_leadership_approval": "waiting",
         "canceled": "cancelled",
         "cancelled": "cancelled",
     }
-    return aliases.get(normalized, normalized)
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized in TASK_STATUSES:
+        return normalized
+    return "open" if fallback_unknown else normalized
 
 
-def normalize_task_priority(value: Any) -> str:
+def normalize_task_priority(value: Any, *, fallback_unknown: bool = False) -> str:
     normalized = _normalize_enum_value(value)
     aliases = {
         "": "medium",
@@ -42,20 +54,22 @@ def normalize_task_priority(value: Any) -> str:
     }
     if normalized in aliases:
         return aliases[normalized]
-    return normalized if normalized in TASK_PRIORITIES else "medium"
+    if normalized in TASK_PRIORITIES:
+        return normalized
+    return "medium" if fallback_unknown else normalized
 
 
-def normalize_task_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+def normalize_task_attributes(attributes: dict[str, Any], *, fallback_unknown: bool = False) -> dict[str, Any]:
     normalized = dict(attributes)
     if "status" in normalized:
-        normalized["status"] = normalize_task_status(normalized["status"])
+        normalized["status"] = normalize_task_status(normalized["status"], fallback_unknown=fallback_unknown)
     if "priority" in normalized:
-        normalized["priority"] = normalize_task_priority(normalized["priority"])
+        normalized["priority"] = normalize_task_priority(normalized["priority"], fallback_unknown=fallback_unknown)
     return normalized
 
 
-def validate_task_attributes(attributes: dict[str, Any], *, partial: bool = False) -> None:
-    attributes.update(normalize_task_attributes(attributes))
+def validate_task_attributes(attributes: dict[str, Any], *, partial: bool = False, fallback_unknown: bool = False) -> None:
+    attributes.update(normalize_task_attributes(attributes, fallback_unknown=fallback_unknown))
     if not partial and not str(attributes.get("title") or "").strip():
         raise HTTPException(status_code=422, detail="Missing required field: title")
     if "title" in attributes and not str(attributes.get("title") or "").strip():
@@ -161,10 +175,10 @@ def upsert_task_from_update(
     title = normalize_task_title(update.get("title") or update.get("details") or "")
     if not title:
         return None
-    update = normalize_task_attributes(update)
+    update = normalize_task_attributes(update, fallback_unknown=True)
     status = update.get("status") or "open"
     priority = update.get("priority") or "medium"
-    validate_task_attributes({"title": title, "status": status, "priority": priority})
+    validate_task_attributes({"title": title, "status": status, "priority": priority}, fallback_unknown=True)
     source_type = update.get("source_type") or default_source_type
     source_id = str(update.get("source_id") or "")
     query = db.query(Task).filter(Task.title.ilike(title))

@@ -138,6 +138,27 @@ def test_capture_confirm_treats_unknown_ai_task_priority_as_medium():
     assert task['priority'] == 'medium'
 
 
+def test_capture_confirm_normalizes_ai_proposed_pending_status():
+    saved = client.post('/capture/confirm', json={
+        'text': 'Screenshot capture with a proposed task pending approval.',
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'task',
+            'title': 'Review proposed leadership approval item',
+            'company': 'PEC',
+            'owner': 'Avery',
+            'status': 'proposed; pending leadership approval',
+            'priority': 'medium',
+            'source_type': 'capture_text',
+        }],
+    })
+    assert saved.status_code == 200
+
+    tasks = client.get('/objects/tasks').json()['items']
+    task = next(item for item in tasks if item['title'] == 'Review proposed leadership approval item')
+    assert task['status'] == 'waiting'
+
+
 def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions():
     meeting = client.post('/objects/meetings', json={'attributes': {
         'title': 'PEC client retention review',
