@@ -379,6 +379,7 @@ function renderRelatedPanel(related) {
 function renderInboxItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
   const sources = Array.isArray(item.supporting_sources) ? item.supporting_sources.filter(Boolean) : [];
+  const actionPanel = executiveInboxAction?.id === String(item.source_id) ? renderClarificationActionPanel(item) : '';
   return `
     <article class="inbox-item">
       <div class="dashboard-item-main">
@@ -395,7 +396,78 @@ function renderInboxItem(item) {
         <button type="button" class="secondary" data-unknown-clarification="${escapeHtml(item.source_id)}">Intentionally unknown</button>
         <button type="button" class="secondary" data-dismiss-clarification="${escapeHtml(item.source_id)}">Dismiss</button>
       </div>
+      ${actionPanel}
     </article>
+  `;
+}
+
+function renderClarificationActionPanel(item) {
+  const id = String(item.source_id || '');
+  const action = executiveInboxAction?.action || '';
+  const preview = executiveInboxAction?.preview || null;
+  const updates = preview?.proposed_update?.updates || [];
+  const summary = clarificationUpdateSummary(updates);
+  const title = {
+    answer: 'Answer clarification',
+    snooze: 'Ask later',
+    dismiss: 'Dismiss clarification',
+    'intentionally-unknown': 'Mark intentionally unknown',
+  }[action] || 'Clarification action';
+
+  if (action === 'answer' && preview) {
+    return `
+      <div class="inline-action-panel">
+        <div class="section-heading">
+          <h4>${escapeHtml(title)}</h4>
+          <button type="button" class="secondary" data-cancel-clarification-action>Close</button>
+        </div>
+        <p class="muted">Review the memory update before applying it.</p>
+        ${summary.length ? `<ul>${summary.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : '<p class="muted">No field changes were found.</p>'}
+        <div class="button-row">
+          <button type="button" data-confirm-clarification="${escapeHtml(id)}" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Confirm update'}</button>
+          <button type="button" class="secondary" data-cancel-clarification-action>Keep as preview</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (action === 'answer') {
+    return `
+      <form class="inline-action-panel" data-clarification-form data-clarification-id="${escapeHtml(id)}" data-clarification-action="answer">
+        <div class="section-heading">
+          <h4>${escapeHtml(title)}</h4>
+          <button type="button" class="secondary" data-cancel-clarification-action>Cancel</button>
+        </div>
+        <label>Answer<textarea name="answer" rows="3" required placeholder="Type the missing context or correction."></textarea></label>
+        <label>Note<textarea name="note" rows="2" placeholder="Optional context for your future self."></textarea></label>
+        <button type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Previewing…' : 'Preview update'}</button>
+      </form>
+    `;
+  }
+
+  if (action === 'snooze') {
+    return `
+      <form class="inline-action-panel" data-clarification-form data-clarification-id="${escapeHtml(id)}" data-clarification-action="snooze">
+        <div class="section-heading">
+          <h4>${escapeHtml(title)}</h4>
+          <button type="button" class="secondary" data-cancel-clarification-action>Cancel</button>
+        </div>
+        <label>Ask again after<input name="snoozed_until" type="datetime-local" value="${escapeHtml(tomorrowDateTimeLocalValue())}" required /></label>
+        <label>Note<textarea name="note" rows="2" placeholder="Optional reason for snoozing."></textarea></label>
+        <button type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Ask later'}</button>
+      </form>
+    `;
+  }
+
+  return `
+    <form class="inline-action-panel" data-clarification-form data-clarification-id="${escapeHtml(id)}" data-clarification-action="${escapeHtml(action)}">
+      <div class="section-heading">
+        <h4>${escapeHtml(title)}</h4>
+        <button type="button" class="secondary" data-cancel-clarification-action>Cancel</button>
+      </div>
+      <label>${action === 'intentionally-unknown' ? 'Note' : 'Reason'}<textarea name="reason" rows="2" placeholder="${action === 'intentionally-unknown' ? 'Optional note.' : 'Optional reason.'}"></textarea></label>
+      <button type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : escapeHtml(action === 'dismiss' ? 'Dismiss' : 'Mark intentionally unknown')}</button>
+    </form>
   `;
 }
 
@@ -419,6 +491,7 @@ let memoryMessage = '';
 let executiveInbox = null;
 let executiveInboxLoading = false;
 let executiveInboxMessage = '';
+let executiveInboxAction = null;
 let backupImportMode = 'merge';
 let captureResult = null;
 let classificationResult = null;
@@ -509,34 +582,78 @@ function scrollMemoryDetailIntoView() {
   });
 }
 
-async function answerClarification(id) {
+function openClarificationAction(id, action) {
   if (!id || submitting) return;
-  const answer = window.prompt('Answer this clarification');
-  if (!answer?.trim()) return;
+  executiveInboxAction = {
+    id: String(id),
+    action,
+    preview: null,
+  };
+  executiveInboxMessage = '';
+  render();
+}
+
+function cancelClarificationAction() {
+  executiveInboxAction = null;
+  render();
+}
+
+function tomorrowDateTimeLocalValue() {
+  const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function clarificationUpdateSummary(updates) {
+  return (updates || []).map((update) => {
+    const fields = Object.entries(update.attributes || {})
+      .map(([field, value]) => `${humanize(field)}: ${Array.isArray(value) ? value.join(', ') : value}`)
+      .join(', ');
+    return `${humanize(update.object_type || 'record')} #${update.object_id || ''}${fields ? ` — ${fields}` : ''}`;
+  }).filter(Boolean);
+}
+
+async function submitClarificationAction(form) {
+  const id = form.getAttribute('data-clarification-id');
+  const action = form.getAttribute('data-clarification-action');
+  if (!id || !action || submitting) return;
+  const formData = new FormData(form);
   submitting = true;
   render();
   try {
-    const preview = await safeJsonFetch(apiUrl(`/clarifications/${id}/answer`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer }),
-    });
-    const updates = preview.clarification?.proposed_update?.updates || [];
-    const summary = updates.map((update) => {
-      const fields = Object.entries(update.attributes || {}).map(([field, value]) => `${field}: ${value}`).join(', ');
-      return `${update.object_type} #${update.object_id} ${fields}`;
-    }).join('\n');
-    if (window.confirm(`Confirm this memory update?\n\n${summary || 'No field changes found.'}`)) {
-      await safeJsonFetch(apiUrl(`/clarifications/${id}/confirm`), {
+    if (action === 'answer') {
+      const answer = String(formData.get('answer') || '').trim();
+      const note = String(formData.get('note') || '').trim();
+      const preview = await safeJsonFetch(apiUrl(`/clarifications/${id}/answer`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ answer, note }),
       });
-      executiveInboxMessage = 'Clarification answered.';
+      executiveInboxAction = { id: String(id), action, preview: preview.clarification };
+      executiveInboxMessage = 'Answer preview ready.';
+    } else if (action === 'snooze') {
+      const rawDate = String(formData.get('snoozed_until') || '').trim();
+      const snoozedUntil = rawDate ? new Date(rawDate).toISOString() : '';
+      await safeJsonFetch(apiUrl(`/clarifications/${id}/snooze`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          snoozed_until: snoozedUntil,
+          note: String(formData.get('note') || '').trim(),
+        }),
+      });
+      executiveInboxMessage = 'Clarification snoozed.';
+      executiveInboxAction = null;
       invalidateGeneratedViews();
     } else {
-      executiveInboxMessage = 'Answer saved as a preview.';
-      executiveInbox = null;
+      await safeJsonFetch(apiUrl(`/clarifications/${id}/${action}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: String(formData.get('reason') || '').trim() }),
+      });
+      executiveInboxMessage = action === 'dismiss' ? 'Clarification dismissed.' : 'Clarification marked intentionally unknown.';
+      executiveInboxAction = null;
+      invalidateGeneratedViews();
     }
     apiError = null;
   } catch (error) {
@@ -547,43 +664,18 @@ async function answerClarification(id) {
   render();
 }
 
-async function snoozeClarification(id) {
+async function confirmClarificationAnswer(id) {
   if (!id || submitting) return;
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-  const snoozedUntil = window.prompt('Ask again after this ISO date/time', tomorrow);
-  if (!snoozedUntil?.trim()) return;
   submitting = true;
   render();
   try {
-    await safeJsonFetch(apiUrl(`/clarifications/${id}/snooze`), {
+    await safeJsonFetch(apiUrl(`/clarifications/${id}/confirm`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ snoozed_until: snoozedUntil }),
+      body: JSON.stringify({}),
     });
-    executiveInboxMessage = 'Clarification snoozed.';
-    invalidateGeneratedViews();
-    apiError = null;
-  } catch (error) {
-    setApiError(error.message);
-  } finally {
-    submitting = false;
-  }
-  render();
-}
-
-async function closeClarification(id, action) {
-  if (!id || submitting) return;
-  const reason = window.prompt(action === 'intentionally-unknown' ? 'Optional note' : 'Reason', '');
-  if (reason === null) return;
-  submitting = true;
-  render();
-  try {
-    await safeJsonFetch(apiUrl(`/clarifications/${id}/${action}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    });
-    executiveInboxMessage = action === 'dismiss' ? 'Clarification dismissed.' : 'Clarification marked intentionally unknown.';
+    executiveInboxMessage = 'Clarification answered.';
+    executiveInboxAction = null;
     invalidateGeneratedViews();
     apiError = null;
   } catch (error) {
@@ -712,16 +804,30 @@ function render() {
       loadExecutiveInbox();
     });
     app.querySelectorAll('[data-answer-clarification]').forEach((button) => {
-      button.addEventListener('click', () => answerClarification(button.getAttribute('data-answer-clarification')));
+      button.addEventListener('click', () => openClarificationAction(button.getAttribute('data-answer-clarification'), 'answer'));
     });
     app.querySelectorAll('[data-snooze-clarification]').forEach((button) => {
-      button.addEventListener('click', () => snoozeClarification(button.getAttribute('data-snooze-clarification')));
+      button.addEventListener('click', () => openClarificationAction(button.getAttribute('data-snooze-clarification'), 'snooze'));
     });
     app.querySelectorAll('[data-unknown-clarification]').forEach((button) => {
-      button.addEventListener('click', () => closeClarification(button.getAttribute('data-unknown-clarification'), 'intentionally-unknown'));
+      button.addEventListener('click', () => openClarificationAction(button.getAttribute('data-unknown-clarification'), 'intentionally-unknown'));
     });
     app.querySelectorAll('[data-dismiss-clarification]').forEach((button) => {
-      button.addEventListener('click', () => closeClarification(button.getAttribute('data-dismiss-clarification'), 'dismiss'));
+      button.addEventListener('click', () => openClarificationAction(button.getAttribute('data-dismiss-clarification'), 'dismiss'));
+    });
+    app.querySelectorAll('[data-clarification-form]').forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        await submitClarificationAction(form);
+      });
+    });
+    app.querySelectorAll('[data-confirm-clarification]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await confirmClarificationAnswer(button.getAttribute('data-confirm-clarification'));
+      });
+    });
+    app.querySelectorAll('[data-cancel-clarification-action]').forEach((button) => {
+      button.addEventListener('click', cancelClarificationAction);
     });
   }
 

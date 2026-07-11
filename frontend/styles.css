@@ -848,6 +848,35 @@ textarea, input {
   padding: 5px 9px;
 }
 
+.inline-action-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.inline-action-panel h4 {
+  margin: 0;
+}
+
+.inline-action-panel label {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-weight: 700;
+}
+
+.inline-action-panel input,
+.inline-action-panel textarea {
+  font-weight: 400;
+}
+
+.inline-action-panel > button,
+.inline-action-panel .button-row {
+  margin-top: 12px;
+}
+
 pre {
   background: #0f172a;
   color: #e2e8f0;
