@@ -25,6 +25,9 @@ const configuredApiBase = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:800
 const API_BASE = (/^https?:\/\//i.test(configuredApiBase) ? configuredApiBase : `https://${configuredApiBase}`).replace(/\/$/, '');
 const apiUrl = (path) => `${API_BASE}${path}`;
 const TOKEN_KEY = 'executiveos_session';
+const SCREENSHOT_MAX_DIMENSION = 1600;
+const SCREENSHOT_JPEG_QUALITY = 0.72;
+const SCREENSHOT_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
 
 function storedToken() {
   try {
@@ -41,6 +44,73 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Screenshot could not be read.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Screenshot could not be prepared.'));
+    image.src = dataUrl;
+  });
+}
+
+async function prepareScreenshot(file) {
+  const originalData = await readFileAsDataUrl(file);
+  const image = await loadImage(originalData);
+  const originalWidth = image.naturalWidth || image.width;
+  const originalHeight = image.naturalHeight || image.height;
+  const scale = Math.min(1, SCREENSHOT_MAX_DIMENSION / Math.max(originalWidth, originalHeight));
+  const width = Math.max(1, Math.round(originalWidth * scale));
+  const height = Math.max(1, Math.round(originalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { alpha: false });
+
+  if (!context) {
+    return {
+      name: file.name,
+      data: originalData,
+      originalSize: file.size,
+      compressedSize: file.size,
+      width: originalWidth,
+      height: originalHeight,
+      compressed: false,
+    };
+  }
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const compressedData = canvas.toDataURL('image/jpeg', SCREENSHOT_JPEG_QUALITY);
+  const compressedBytes = Math.round((compressedData.length - 'data:image/jpeg;base64,'.length) * 0.75);
+  const useOriginal = scale === 1 && originalData.length <= compressedData.length;
+
+  return {
+    name: useOriginal ? file.name : file.name.replace(/\.(png|webp|jpe?g)$/i, '.jpg'),
+    data: useOriginal ? originalData : compressedData,
+    originalSize: file.size,
+    compressedSize: useOriginal ? file.size : compressedBytes,
+    width,
+    height,
+    compressed: !useOriginal,
+  };
 }
 
 function renderList(items, emptyMessage = 'Nothing needs attention right now.', renderer = renderListItem) {
@@ -335,6 +405,7 @@ let meetingPrep = null;
 let searchResults = null;
 let captureText = '';
 let screenshots = [];
+let screenshotsProcessing = false;
 let searchQuery = '';
 let meetingQuery = '';
 let memoryType = 'people';
@@ -662,8 +733,8 @@ function render() {
       textarea.addEventListener('input', (event) => {
         captureText = event.target.value;
         if (button) {
-          button.disabled = submitting || (!captureText.trim() && !screenshots.length);
-          button.textContent = screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates';
+          button.disabled = submitting || screenshotsProcessing || (!captureText.trim() && !screenshots.length);
+          button.textContent = screenshotsProcessing ? 'Preparing screenshots...' : screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates';
         }
         if (classificationResult) {
           classificationResult = null;
@@ -673,7 +744,7 @@ function render() {
         captureResult = null;
       });
     }
-    screenshotInput?.addEventListener('change', (event) => {
+    screenshotInput?.addEventListener('change', async (event) => {
       const files = Array.from(event.target.files || []);
       if (!files.length) return;
       if (screenshots.length + files.length > 5) {
@@ -685,24 +756,27 @@ function render() {
         setApiError('Use PNG, JPEG, or WebP screenshots.');
         return;
       }
-      const oversized = files.find((file) => file.size > 5 * 1024 * 1024);
+      const oversized = files.find((file) => file.size > SCREENSHOT_MAX_UPLOAD_BYTES);
       if (oversized) {
-        setApiError('Each screenshot must be 5 MB or smaller.');
+        setApiError('Each screenshot must be 12 MB or smaller.');
         return;
       }
-      Promise.all(files.map((file) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ name: file.name, data: String(reader.result || '') });
-        reader.onerror = () => reject(new Error('Screenshot could not be read.'));
-        reader.readAsDataURL(file);
-      }))).then((loadedScreenshots) => {
+      try {
+        screenshotsProcessing = true;
+        apiError = null;
+        render();
+        const loadedScreenshots = await Promise.all(files.map((file) => prepareScreenshot(file)));
         screenshots = [...screenshots, ...loadedScreenshots];
         classificationResult = null;
         selectedUpdateIndices = [];
         captureResult = null;
-        apiError = null;
+      } catch (error) {
+        setApiError(error.message);
+      } finally {
+        screenshotsProcessing = false;
+        if (event.target) event.target.value = '';
         render();
-      }).catch((error) => setApiError(error.message));
+      }
     });
     app.querySelectorAll('[data-remove-screenshot]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -721,7 +795,7 @@ function render() {
     });
     if (button) {
       button.addEventListener('click', async () => {
-        if ((!captureText.trim() && !screenshots.length) || submitting) return;
+        if ((!captureText.trim() && !screenshots.length) || submitting || screenshotsProcessing) return;
         submitting = true;
         render();
         try {
@@ -1203,12 +1277,12 @@ function renderPanel() {
       <div class="screenshot-controls">
         <label class="file-button" for="screenshot-input">Attach screenshots</label>
         <input id="screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" multiple />
-        <span class="muted">PNG, JPEG, or WebP · 5 MB each · 5 maximum</span>
+        <span class="muted">PNG, JPEG, or WebP · compressed before analysis · 5 maximum</span>
       </div>
       ${screenshots.length ? `<div class="screenshot-preview-grid">${screenshots.map((screenshot, index) => `
-        <div class="screenshot-preview"><img src="${screenshot.data}" alt="Screenshot ${index + 1} selected for capture" /><div><strong>${escapeHtml(screenshot.name)}</strong><button data-remove-screenshot="${index}" type="button" class="secondary">Remove</button></div></div>
+        <div class="screenshot-preview"><img src="${screenshot.data}" alt="Screenshot ${index + 1} selected for capture" /><div><strong>${escapeHtml(screenshot.name)}</strong><p class="muted">${escapeHtml(`${screenshot.width || ''}${screenshot.width && screenshot.height ? ' x ' : ''}${screenshot.height || ''}${screenshot.compressedSize ? ` · ${formatBytes(screenshot.compressedSize)}` : ''}${screenshot.originalSize && screenshot.compressedSize && screenshot.compressedSize < screenshot.originalSize ? ` from ${formatBytes(screenshot.originalSize)}` : ''}`)}</p><button data-remove-screenshot="${index}" type="button" class="secondary">Remove</button></div></div>
       `).join('')}<button id="screenshots-clear" type="button" class="secondary">Remove all</button></div>` : ''}
-      <button id="capture-submit" style="margin-top: 12px;" ${submitting || (!captureText.trim() && !screenshots.length) ? 'disabled' : ''}>${submitting ? 'Working…' : screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates'}</button>
+      <button id="capture-submit" style="margin-top: 12px;" ${submitting || screenshotsProcessing || (!captureText.trim() && !screenshots.length) ? 'disabled' : ''}>${screenshotsProcessing ? 'Preparing screenshots...' : submitting ? 'Working…' : screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates'}</button>
       ${classificationResult ? `
         <div id="classification-review" style="margin-top: 12px;">
           <div class="section-heading">
