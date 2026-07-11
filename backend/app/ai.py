@@ -17,6 +17,14 @@ def _openai_timeout_seconds() -> float:
     return max(10.0, timeout)
 
 
+def _openai_image_detail() -> str:
+    detail = os.getenv("OPENAI_IMAGE_DETAIL", "high").strip().lower()
+    if detail not in {"low", "high", "original", "auto"}:
+        logger.warning("Invalid OPENAI_IMAGE_DETAIL value %r; using high", detail)
+        return "high"
+    return detail
+
+
 class SuggestedUpdate(BaseModel):
     type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric", "task"]
     name: str = ""
@@ -114,8 +122,9 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
             "text": f"Known memory:\n{memory_context}\n\nTyped capture context:\n{capture_prompt}\n\nIf screenshots are attached, analyze the typed context and screenshots together.",
         }]
         image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
+        image_detail = _openai_image_detail()
         for image in image_inputs:
-            user_content.append({"type": "input_image", "image_url": image})
+            user_content.append({"type": "input_image", "image_url": image, "detail": image_detail})
 
         model = os.getenv("OPENAI_MODEL", "gpt-5.6")
         response = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2).responses.parse(

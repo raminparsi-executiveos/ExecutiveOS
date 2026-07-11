@@ -32,7 +32,7 @@ def _screenshot_unavailable_message() -> str:
         return "Screenshot analysis needs OPENAI_API_KEY configured on the backend."
     return (
         "Screenshot analysis timed out or failed through the OpenAI connection. "
-        "Check OPENAI_MODEL, OPENAI_TIMEOUT_SECONDS, model access, and backend logs."
+        "Check OPENAI_MODEL, OPENAI_IMAGE_DETAIL, OPENAI_TIMEOUT_SECONDS, model access, and backend logs."
     )
 
 

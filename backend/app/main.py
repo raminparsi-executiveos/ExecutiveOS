@@ -176,6 +176,7 @@ def authentication_status():
         "ai": {
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
             "model": os.getenv("OPENAI_MODEL", "gpt-5.6"),
+            "image_detail": os.getenv("OPENAI_IMAGE_DETAIL", "high"),
             "timeout_seconds": os.getenv("OPENAI_TIMEOUT_SECONDS", "60"),
         },
         "requirements": {"password_min_length": 12, "session_secret_min_length": 32},
