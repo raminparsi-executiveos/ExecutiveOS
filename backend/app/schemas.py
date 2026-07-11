@@ -109,6 +109,25 @@ class EntityAliasRequest(BaseModel):
     confidence: str = Field(default="user_confirmed", max_length=50)
 
 
+class ClarificationAnswerRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=2_000)
+    note: str = Field(default="", max_length=2_000)
+
+
+class ClarificationConfirmRequest(BaseModel):
+    update_indexes: list[int] = Field(default_factory=list, max_length=20)
+
+
+class ClarificationSnoozeRequest(BaseModel):
+    snoozed_until: str = Field(min_length=1, max_length=80)
+    note: str = Field(default="", max_length=2_000)
+
+
+class ClarificationCloseRequest(BaseModel):
+    reason: str = Field(default="", max_length=2_000)
+    scope: str = Field(default="", max_length=300)
+
+
 class BackupImportRequest(BaseModel):
     backup: dict[str, Any] = Field(default_factory=dict)
     mode: str = Field(default="merge", max_length=20)

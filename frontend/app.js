@@ -1,6 +1,7 @@
 const sections = [
   { key: 'capture', label: 'Capture' },
   { key: 'briefing', label: 'Morning Briefing' },
+  { key: 'inbox', label: 'Executive Inbox' },
   { key: 'prep', label: 'Meeting Prep' },
   { key: 'search', label: 'Search / Ask' },
   { key: 'memory', label: 'Memory' },
@@ -305,6 +306,29 @@ function renderRelatedPanel(related) {
   `;
 }
 
+function renderInboxItem(item) {
+  const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
+  const sources = Array.isArray(item.supporting_sources) ? item.supporting_sources.filter(Boolean) : [];
+  return `
+    <article class="inbox-item">
+      <div class="dashboard-item-main">
+        ${renderCompanyChip(item.company)}
+        <strong>${escapeHtml(item.title || 'Clarification needed')}</strong>
+        <span class="score-pill">${escapeHtml(item.priority || 'medium')}</span>
+      </div>
+      <p>${escapeHtml(item.summary || 'Review this item before changing memory.')}</p>
+      ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+      ${sources.length ? `<details class="inbox-evidence"><summary>Evidence</summary>${renderList(sources.map((source) => source.text || source.summary || `${source.source_type || 'source'} #${source.source_id || ''}`))}</details>` : ''}
+      <div class="inbox-actions">
+        <button type="button" class="secondary" data-answer-clarification="${escapeHtml(item.source_id)}">Answer</button>
+        <button type="button" class="secondary" data-snooze-clarification="${escapeHtml(item.source_id)}">Ask later</button>
+        <button type="button" class="secondary" data-unknown-clarification="${escapeHtml(item.source_id)}">Intentionally unknown</button>
+        <button type="button" class="secondary" data-dismiss-clarification="${escapeHtml(item.source_id)}">Dismiss</button>
+      </div>
+    </article>
+  `;
+}
+
 let active = 'capture';
 let briefing = null;
 let meetingPrep = null;
@@ -320,6 +344,9 @@ let memoryLoading = false;
 let memoryEdit = null;
 let memoryRelated = null;
 let memoryMessage = '';
+let executiveInbox = null;
+let executiveInboxLoading = false;
+let executiveInboxMessage = '';
 let backupImportMode = 'merge';
 let captureResult = null;
 let classificationResult = null;
@@ -383,6 +410,112 @@ async function loadMemoryObjects() {
   }
 }
 
+async function loadExecutiveInbox() {
+  executiveInboxLoading = true;
+  executiveInboxMessage = '';
+  try {
+    executiveInbox = await safeJsonFetch(apiUrl('/executive-inbox?source_type=clarification'));
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    executiveInboxLoading = false;
+    render();
+  }
+}
+
+function invalidateGeneratedViews() {
+  executiveInbox = null;
+  briefing = null;
+  meetingPrep = null;
+  searchResults = null;
+}
+
+async function answerClarification(id) {
+  if (!id || submitting) return;
+  const answer = window.prompt('Answer this clarification');
+  if (!answer?.trim()) return;
+  submitting = true;
+  render();
+  try {
+    const preview = await safeJsonFetch(apiUrl(`/clarifications/${id}/answer`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    });
+    const updates = preview.clarification?.proposed_update?.updates || [];
+    const summary = updates.map((update) => {
+      const fields = Object.entries(update.attributes || {}).map(([field, value]) => `${field}: ${value}`).join(', ');
+      return `${update.object_type} #${update.object_id} ${fields}`;
+    }).join('\n');
+    if (window.confirm(`Confirm this memory update?\n\n${summary || 'No field changes found.'}`)) {
+      await safeJsonFetch(apiUrl(`/clarifications/${id}/confirm`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      executiveInboxMessage = 'Clarification answered.';
+      invalidateGeneratedViews();
+    } else {
+      executiveInboxMessage = 'Answer saved as a preview.';
+      executiveInbox = null;
+    }
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
+async function snoozeClarification(id) {
+  if (!id || submitting) return;
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const snoozedUntil = window.prompt('Ask again after this ISO date/time', tomorrow);
+  if (!snoozedUntil?.trim()) return;
+  submitting = true;
+  render();
+  try {
+    await safeJsonFetch(apiUrl(`/clarifications/${id}/snooze`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snoozed_until: snoozedUntil }),
+    });
+    executiveInboxMessage = 'Clarification snoozed.';
+    invalidateGeneratedViews();
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
+async function closeClarification(id, action) {
+  if (!id || submitting) return;
+  const reason = window.prompt(action === 'intentionally-unknown' ? 'Optional note' : 'Reason', '');
+  if (reason === null) return;
+  submitting = true;
+  render();
+  try {
+    await safeJsonFetch(apiUrl(`/clarifications/${id}/${action}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    executiveInboxMessage = action === 'dismiss' ? 'Clarification dismissed.' : 'Clarification marked intentionally unknown.';
+    invalidateGeneratedViews();
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
 async function completeTaskFromControl(taskId) {
   if (!taskId || submitting) return;
   submitting = true;
@@ -390,6 +523,7 @@ async function completeTaskFromControl(taskId) {
   try {
     await safeJsonFetch(apiUrl(`/tasks/${taskId}/complete`), { method: 'POST' });
     memoryObjects = null;
+    executiveInbox = null;
     searchResults = null;
     apiError = null;
     if (active === 'briefing') {
@@ -430,6 +564,7 @@ async function resolveItemFromControl(label) {
       }),
     });
     memoryObjects = null;
+    executiveInbox = null;
     searchResults = null;
     apiError = null;
     if (active === 'briefing') {
@@ -492,6 +627,25 @@ function render() {
       await resolveItemFromControl(button.getAttribute('data-resolve-item'));
     });
   });
+
+  if (active === 'inbox') {
+    app.querySelector('#inbox-refresh')?.addEventListener('click', () => {
+      executiveInbox = null;
+      loadExecutiveInbox();
+    });
+    app.querySelectorAll('[data-answer-clarification]').forEach((button) => {
+      button.addEventListener('click', () => answerClarification(button.getAttribute('data-answer-clarification')));
+    });
+    app.querySelectorAll('[data-snooze-clarification]').forEach((button) => {
+      button.addEventListener('click', () => snoozeClarification(button.getAttribute('data-snooze-clarification')));
+    });
+    app.querySelectorAll('[data-unknown-clarification]').forEach((button) => {
+      button.addEventListener('click', () => closeClarification(button.getAttribute('data-unknown-clarification'), 'intentionally-unknown'));
+    });
+    app.querySelectorAll('[data-dismiss-clarification]').forEach((button) => {
+      button.addEventListener('click', () => closeClarification(button.getAttribute('data-dismiss-clarification'), 'dismiss'));
+    });
+  }
 
   if (active === 'capture') {
     const textarea = app.querySelector('textarea');
@@ -606,6 +760,7 @@ function render() {
           // Generated outputs are disposable views over memory. Invalidate them
           // whenever the underlying memory changes.
           briefing = null;
+          executiveInbox = null;
           meetingPrep = null;
           searchResults = null;
           captureObservability = null;
@@ -783,6 +938,7 @@ function render() {
         memoryObjects = null;
         memoryRelated = null;
         memoryEdit = null;
+        executiveInbox = null;
         briefing = null;
         meetingPrep = null;
         searchResults = null;
@@ -848,6 +1004,7 @@ function render() {
           await safeJsonFetch(apiUrl(`/tasks/${id}/reopen`), { method: 'POST' });
           memoryObjects = null;
           memoryMessage = 'Task reopened.';
+          executiveInbox = null;
           briefing = null;
           meetingPrep = null;
           searchResults = null;
@@ -888,6 +1045,7 @@ function render() {
         memoryRelated = null;
         memoryObjects = null;
         memoryMessage = 'Memory object updated.';
+        executiveInbox = null;
         briefing = null;
         meetingPrep = null;
         searchResults = null;
@@ -909,6 +1067,7 @@ function render() {
         memoryRelated = null;
         memoryObjects = null;
         memoryMessage = 'Memory object deleted.';
+        executiveInbox = null;
         briefing = null;
         meetingPrep = null;
         searchResults = null;
@@ -1104,6 +1263,7 @@ function renderPanel() {
       ['Blocked or Waiting', briefing.blocked_or_waiting, 'blocked'],
       ['Changed Since Last Briefing', briefing.changed_since_last_briefing, 'changed'],
       ['Upcoming', briefing.upcoming, 'upcoming'],
+      ['Clarifications Needed', briefing.clarifications_needed, 'clarification'],
     ].filter(([, items]) => itemCount(items) > 0);
     const supportingSections = [
       ['Top Priorities', briefing.top_priorities],
@@ -1127,6 +1287,25 @@ function renderPanel() {
           ${supportingSections.map(([title, items]) => renderCollapsedBriefingSection(title, items || [])).join('')}
         </div>
       </details>
+    `;
+  }
+
+  if (active === 'inbox') {
+    if (!executiveInbox && !executiveInboxLoading) {
+      loadExecutiveInbox();
+    }
+    return `
+      <h2>Executive Inbox</h2>
+      <p>Process high-value clarification questions before they change durable memory.</p>
+      ${executiveInboxMessage ? `<p class="success" role="status">${escapeHtml(executiveInboxMessage)}</p>` : ''}
+      <div class="toolbar">
+        <button id="inbox-refresh" type="button" class="secondary" ${submitting || executiveInboxLoading ? 'disabled' : ''}>Refresh</button>
+      </div>
+      ${executiveInboxLoading || !executiveInbox ? '<p>Loading inbox…</p>' : `
+        <div class="inbox-list">
+          ${executiveInbox.items?.length ? executiveInbox.items.map(renderInboxItem).join('') : '<p class="muted">No clarification questions need attention right now.</p>'}
+        </div>
+      `}
     `;
   }
 

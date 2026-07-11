@@ -22,6 +22,7 @@ ExecutiveOS stores executive memory as typed objects plus immutable capture hist
 | `RevisionRecord` | Auditable before/after snapshots for creates, edits, deletes, capture approvals, and inbox approvals. |
 | `ReviewAlert` | User-resolved alert for stale, conflicting, overdue, duplicate-looking, or superseded memory. |
 | `IntegrationInboxItem` | Reviewed-only staging area for Google Calendar event data and uploaded-document text. |
+| `Clarification` | Durable question about material missing context, stale information, contradictions, ambiguous action language, or disconnected records, with evidence, score reasons, lifecycle status, answer preview, and confirmation state. |
 | `EntityAlias` | Confirmed alias for dynamic entity resolution without automatic merging. |
 | `DashboardConfig` | Configurable company dashboard module definitions. |
 
@@ -65,3 +66,5 @@ Briefings, meeting prep, and search answers are generated on demand from stored 
 Morning Briefing ranked items include title, company, owner, why it matters, status, due date, recommended next action, supporting source, score, and score reasons. Scores are transparent derived values based on priority, due date, overdue duration, status, risks, missing owner, executive ownership, recent changes, and blocked/waiting state.
 
 Search answers separate directly supported facts, inferences, and missing information. Integration Inbox records never modify memory until suggestions are approved. Review alerts are durable records with explicit resolution timestamps so dismissed issues do not repeatedly interrupt unless materially new evidence creates a new alert.
+
+Clarification cards are durable generated records, not facts. They use stable target record IDs and evidence snippets to explain why a question matters. Answers are stored as reviewable proposed updates first; confirming the preview applies validated field changes to the target record and writes revision history. Snoozed, dismissed, intentionally unknown, and suppressed clarifications remain auditable and stay out of open briefing/inbox sections.

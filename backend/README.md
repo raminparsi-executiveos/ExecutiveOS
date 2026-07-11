@@ -66,6 +66,17 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `GET` | `/integration-inbox` | Lists staged calendar/document inbox items. |
 | `POST` | `/integration-inbox` | Creates an inbox item from Google Calendar event data or uploaded-document text. |
 | `POST` | `/integration-inbox/{item_id}/approve` | Saves reviewed inbox suggestions through the approval workflow. |
+| `GET` | `/executive-inbox` | Lists normalized executive inbox items, including clarification cards. |
+| `POST` | `/clarifications/generate` | Runs deterministic clarification rules and deduplicates resulting cards. |
+| `GET` | `/clarifications` | Lists clarification cards with status, company, type, target, and score filters. |
+| `GET` | `/clarifications/{clarification_id}` | Retrieves one clarification with evidence and proposed update state. |
+| `POST` | `/clarifications/{clarification_id}/answer` | Stores an answer and returns a proposed update preview without mutating memory. |
+| `POST` | `/clarifications/{clarification_id}/confirm` | Applies the reviewed proposed update to stable target IDs and records revision history. |
+| `POST` | `/clarifications/{clarification_id}/snooze` | Hides a clarification until an ISO datetime. |
+| `POST` | `/clarifications/{clarification_id}/dismiss` | Dismisses a clarification while keeping it auditable. |
+| `POST` | `/clarifications/{clarification_id}/intentionally-unknown` | Marks the answer intentionally unknown without changing target memory. |
+| `POST` | `/clarifications/{clarification_id}/suppress` | Suppresses a clarification rule for the supplied scope. |
+| `POST` | `/clarifications/{clarification_id}/reopen` | Reopens an answered, dismissed, snoozed, or suppressed clarification. |
 | `POST` | `/entity-aliases` | Stores a confirmed alias for entity resolution. |
 | `GET` | `/entity-resolution/suggestions` | Lists possible duplicate or alias relationships requiring confirmation. |
 | `GET` | `/backup/export` | Exports a versioned JSON backup of durable memory, provenance, review state, aliases, inbox records, dashboards, captures, and conversations. |
@@ -84,6 +95,8 @@ Object listing accepts an optional `company` query parameter for company-scoped 
 Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
 
 The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
+
+Clarifications are deterministic, durable questions about material missing context, stale records, contradictions, ambiguous action language, and disconnected decisions. They appear in `/executive-inbox`, the `clarifications_needed` briefing section, and relevant meeting prep questions. Answering a clarification creates a preview; confirming it is the separate operation that updates stable target records and creates revision history.
 
 Capture-approved records, manual object edits, and inbox approvals create provenance/revision records. Search supports company, record type, date, status, owner, priority, and conversation filters and returns directly supported facts, inferences, missing information, and supporting records.
 

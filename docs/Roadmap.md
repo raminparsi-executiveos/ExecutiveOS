@@ -112,6 +112,14 @@
 - Added capture observability endpoint with classification-source counts, AI/fallback usage, fallback rate, image-unavailable count, saved-update totals, and recent capture previews.
 - Added Capture UI quality panel so AI classification quality and fallback frequency can be monitored during normal use.
 
+### Next Candidate: Clarification and Memory-Gap Engine
+
+- Added durable clarification records with lifecycle statuses for open, answered, snoozed, dismissed, intentionally unknown, and suppressed questions.
+- Added deterministic rules for material missing owners/due dates/next actions/reasoning/metric periods, stale active projects, active-project owner contradictions, ambiguous task language, and disconnected decisions.
+- Added clarification endpoints for generation, listing, retrieval, answer preview, confirmation, snoozing, dismissal, intentionally unknown, suppression, and reopening.
+- Added clarification cards to the normalized Executive Inbox, Morning Briefing, and relevant Meeting Prep questions.
+- Added tests for deduplication, low-value field suppression, preview-before-write, stable-ID confirmation with revision history, lifecycle actions, contradictions, ambiguous language, stale records, briefing limits, inbox integration, and metadata availability.
+
 ## Next Candidates
 
 - Review deployed usage and identify the next enhancement set.

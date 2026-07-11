@@ -17,6 +17,7 @@ from .database import Base, engine, get_db
 from .linking_service import related_records
 from .models import (
     CaptureRecord,
+    Clarification,
     Company,
     DashboardConfig,
     Decision,
@@ -37,6 +38,10 @@ from .schemas import (
     CaptureClassificationRequest,
     CaptureConfirmationRequest,
     CaptureRequest,
+    ClarificationAnswerRequest,
+    ClarificationCloseRequest,
+    ClarificationConfirmRequest,
+    ClarificationSnoozeRequest,
     CreateObjectRequest,
     DashboardConfigRequest,
     EntityAliasRequest,
@@ -47,6 +52,20 @@ from .schemas import (
     ReviewAlertResolutionRequest,
     SearchRequest,
     UpdateObjectRequest,
+)
+from .clarification_service import (
+    confirm_clarification_update,
+    dismiss_clarification,
+    executive_inbox_items,
+    generate_clarifications,
+    list_clarifications,
+    mark_intentionally_unknown,
+    parse_datetime,
+    preview_clarification_answer,
+    reopen_clarification,
+    serialize_clarification,
+    snooze_clarification,
+    suppress_clarification,
 )
 from .seed import seed_data
 from .briefing_service import build_ranked_briefing
@@ -534,6 +553,192 @@ def approve_integration_inbox_item(
     return {"message": "Inbox item reviewed", "item": _serialize_model(item)}
 
 
+@app.get("/executive-inbox")
+def get_executive_inbox(
+    refresh: bool = Query(default=True),
+    status: str = Query(default="open", max_length=50),
+    company: str = Query(default="", max_length=100),
+    source_type: str = Query(default="", max_length=50),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    items = executive_inbox_items(db, refresh=refresh, status=status, company=company)
+    if refresh:
+        db.commit()
+    if source_type:
+        items = [item for item in items if item["source_type"] == source_type]
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/clarifications/generate")
+def generate_clarification_queue(db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    try:
+        generated = generate_clarifications(db)
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Clarifications could not be generated") from error
+    return {"items": [serialize_clarification(item) for item in generated], "total": len(generated)}
+
+
+@app.get("/clarifications")
+def get_clarifications(
+    refresh: bool = Query(default=True),
+    status: str = Query(default="open", max_length=50),
+    company: str = Query(default="", max_length=100),
+    clarification_type: str = Query(default="", max_length=100),
+    target_record_type: str = Query(default="", max_length=100),
+    min_score: int = Query(default=0, ge=0, le=1000),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    items = list_clarifications(
+        db,
+        refresh=refresh,
+        status=status,
+        company=company,
+        clarification_type=clarification_type,
+        target_record_type=target_record_type,
+        min_score=min_score,
+        limit=limit,
+    )
+    if refresh:
+        db.commit()
+    return {"items": [serialize_clarification(item) for item in items], "total": len(items)}
+
+
+@app.get("/clarifications/{clarification_id}")
+def get_clarification(clarification_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    return {"clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/answer")
+def answer_clarification(
+    clarification_id: int,
+    payload: ClarificationAnswerRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    try:
+        preview_clarification_answer(db, clarification, payload.answer, payload.note)
+        db.commit()
+        db.refresh(clarification)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Clarification answer could not be previewed") from error
+    return {"message": "Clarification answer previewed", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/confirm")
+def confirm_clarification(
+    clarification_id: int,
+    payload: ClarificationConfirmRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    try:
+        confirm_clarification_update(db, clarification, update_indexes=payload.update_indexes, changed_by=_user)
+        db.commit()
+        db.refresh(clarification)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Clarification update could not be confirmed") from error
+    return {"message": "Clarification confirmed", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/snooze")
+def snooze_clarification_endpoint(
+    clarification_id: int,
+    payload: ClarificationSnoozeRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    try:
+        snooze_clarification(db, clarification, parse_datetime(payload.snoozed_until), payload.note)
+        db.commit()
+        db.refresh(clarification)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Clarification could not be snoozed") from error
+    return {"message": "Clarification snoozed", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/dismiss")
+def dismiss_clarification_endpoint(
+    clarification_id: int,
+    payload: ClarificationCloseRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    dismiss_clarification(db, clarification, payload.reason)
+    db.commit()
+    db.refresh(clarification)
+    return {"message": "Clarification dismissed", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/intentionally-unknown")
+def intentionally_unknown_clarification(
+    clarification_id: int,
+    payload: ClarificationCloseRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    mark_intentionally_unknown(db, clarification, payload.reason)
+    db.commit()
+    db.refresh(clarification)
+    return {"message": "Clarification marked intentionally unknown", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/suppress")
+def suppress_clarification_endpoint(
+    clarification_id: int,
+    payload: ClarificationCloseRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    suppress_clarification(db, clarification, payload.scope, payload.reason)
+    db.commit()
+    db.refresh(clarification)
+    return {"message": "Clarification suppressed", "clarification": serialize_clarification(clarification)}
+
+
+@app.post("/clarifications/{clarification_id}/reopen")
+def reopen_clarification_endpoint(
+    clarification_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    clarification = db.get(Clarification, clarification_id)
+    if not clarification:
+        raise HTTPException(status_code=404, detail="Clarification not found")
+    reopen_clarification(db, clarification)
+    db.commit()
+    db.refresh(clarification)
+    return {"message": "Clarification reopened", "clarification": serialize_clarification(clarification)}
+
+
 @app.post("/entity-aliases")
 def create_entity_alias(payload: EntityAliasRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     _model_for_object_type(payload.entity_type)
@@ -610,6 +815,13 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         )
         if task.status in OPEN_TASK_STATUSES
     ]
+    relevant_clarifications = list_clarifications(
+        db,
+        status="open",
+        company=company_name or "",
+        limit=5,
+    )
+    db.commit()
     recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
     resolution_contexts = [capture.raw_text for capture in recent_captures]
 
@@ -735,6 +947,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "decisions_required": related_decisions,
         "recommended_agenda": agenda,
         "questions_to_ask": list(dict.fromkeys(
+            [clarification.question for clarification in relevant_clarifications] +
             [question for meeting in meetings for question in (meeting.open_questions or [])] +
             [f"What decision is needed on {decision}?" for decision in related_decisions[:3]] +
             [f"What is blocking {task}?" for task in overdue_tasks[:3]]
@@ -776,6 +989,10 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "risks_detail": risk_details[:5],
         "open_commitments_detail": open_commitment_details[:8],
         "overdue_tasks_detail": overdue_task_details[:8],
+        "clarifications_needed": [
+            serialize_clarification(clarification)
+            for clarification in relevant_clarifications
+        ],
         **dynamic_sections,
     }
 

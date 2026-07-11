@@ -259,6 +259,37 @@ class IntegrationInboxItem(TimestampMixin, Base):
     error = Column(Text, default="")
 
 
+class Clarification(TimestampMixin, Base):
+    __tablename__ = "clarifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clarification_type = Column(String, index=True, nullable=False)
+    subtype = Column(String, default="", index=True)
+    status = Column(String, default="open", index=True)
+    question = Column(Text, nullable=False)
+    why_it_matters = Column(Text, default="")
+    target_record_type = Column(String, default="", index=True)
+    target_record_id = Column(Integer, nullable=True, index=True)
+    company = Column(String, default="", index=True)
+    evidence = Column(JSON, default=list)
+    score = Column(Integer, default=0, index=True)
+    score_reasons = Column(JSON, default=list)
+    suggested_answers = Column(JSON, default=list)
+    proposed_update = Column(JSON, default=dict)
+    confidence = Column(String, default="deterministic")
+    uncertainty = Column(Text, default="")
+    user_response = Column(Text, default="")
+    note = Column(Text, default="")
+    answered_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    snoozed_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    suppression_scope = Column(String, default="")
+    suppression_reason = Column(Text, default="")
+    dedupe_key = Column(String, unique=True, index=True, nullable=False)
+    evidence_fingerprint = Column(String, default="")
+    generation_rule_version = Column(String, default="clarification-rules-v1", index=True)
+
+
 class EntityAlias(TimestampMixin, Base):
     __tablename__ = "entity_aliases"
 
