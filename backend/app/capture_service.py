@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import date
 from typing import Any
@@ -24,6 +25,12 @@ WAITING_ITEM_STOP_WORDS = {
 }
 
 RESOLUTION_WORDS = {"resolved", "complete", "completed", "done", "closed", "fixed"}
+
+
+def _screenshot_unavailable_message() -> str:
+    if not os.getenv("OPENAI_API_KEY"):
+        return "Screenshot analysis needs OPENAI_API_KEY configured on the backend."
+    return "Screenshot analysis could not reach a compatible OpenAI vision model. Check OPENAI_MODEL and backend logs."
 
 
 def _normalized_tokens(text: str) -> set[str]:
@@ -399,8 +406,17 @@ def _classify_capture_text(
             analysis.follow_ups,
             "ai",
         )
+    if image_inputs and text.strip():
+        updates = resolution_updates + _fallback_classify_capture_text(text)
+        follow_ups = _task_resolution_suggestions(db, text)
+        follow_ups.append(f"{_screenshot_unavailable_message()} The text entry was still reviewed.")
+        if not updates:
+            follow_ups.append(
+                "What person, company, project, decision, or metric should be saved from this update?"
+            )
+        return updates, follow_ups, "local_fallback"
     if image_inputs:
-        return [], ["Screenshot analysis requires a configured and available AI connection."], "image_unavailable"
+        return [], [_screenshot_unavailable_message()], "image_unavailable"
     updates = resolution_updates + _fallback_classify_capture_text(text)
     follow_ups = _task_resolution_suggestions(db, text)
     if not updates:

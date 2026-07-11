@@ -167,6 +167,10 @@ def authentication_status():
         "required": auth_required(),
         "configured": auth_configured(),
         "checks": auth_configuration_checks(),
+        "ai": {
+            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "model": os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+        },
         "requirements": {"password_min_length": 12, "session_secret_min_length": 32},
     }
 

@@ -139,12 +139,29 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
     assert unavailable.status_code == 200
     assert unavailable.json()['classification_source'] == 'image_unavailable'
     assert unavailable.json()['suggested_updates'] == []
-    assert unavailable.json()['follow_ups']
+    assert unavailable.json()['follow_ups'] == [
+        'Screenshot analysis needs OPENAI_API_KEY configured on the backend.'
+    ]
 
     too_many = client.post('/capture/classify', json={
         'image_data_list': ['data:image/png;base64,iVBORw0KGgo='] * 6,
     })
     assert too_many.status_code == 422
+
+
+def test_text_is_classified_when_screenshot_analysis_is_unavailable(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory, image: None)
+    response = client.post('/capture/classify', json={
+        'text': 'Kyle will send the revised client-retention plan by Friday.',
+        'image_data': 'data:image/png;base64,iVBORw0KGgo=',
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['classification_source'] == 'local_fallback'
+    task_update = next(update for update in payload['suggested_updates'] if update['type'] == 'task')
+    assert task_update['title'] == 'Kyle will send the revised client-retention plan by Friday'
+    assert any('The text entry was still reviewed.' in follow_up for follow_up in payload['follow_ups'])
 
 
 def test_text_only_capture_accepts_explicit_empty_image_field(monkeypatch):

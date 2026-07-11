@@ -71,6 +71,9 @@ metric, task. Create task suggestions for commitments, owners, blockers, and act
 items. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
 dates when present. Use ISO dates when the date is explicit. Do not create raw notes.
 Put useful missing-context questions in follow_ups. Never invent facts.
+When both typed text and screenshots are supplied, analyze them together as one capture:
+use the text as user-provided context for the screenshots, and use screenshots as evidence
+for the typed request. Do not ignore either source.
 Classify each suggestion as one of confirmed_fact, decision, commitment, proposal,
 concern, assumption, recommendation, or unverified_information. Set verification_state
 to ai_extracted_pending_review unless the capture explicitly says the user confirmed it.
@@ -98,7 +101,7 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         capture_prompt = text.strip() or "Extract the executive-memory facts visible in this screenshot."
         user_content = [{
             "type": "input_text",
-            "text": f"Known memory:\n{memory_context}\n\nCapture context:\n{capture_prompt}",
+            "text": f"Known memory:\n{memory_context}\n\nTyped capture context:\n{capture_prompt}\n\nIf screenshots are attached, analyze the typed context and screenshots together.",
         }]
         image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
         for image in image_inputs:
