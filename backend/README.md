@@ -35,6 +35,7 @@ alembic upgrade head
 | `DATABASE_URL` | SQLAlchemy database URL. Defaults to `sqlite:///./executiveos.db`. `postgres://` URLs are normalized to `postgresql://`. |
 | `OPENAI_API_KEY` | Enables AI capture classification and screenshot extraction. |
 | `OPENAI_MODEL` | Capture model. Defaults to `gpt-5.6`. |
+| `OPENAI_TIMEOUT_SECONDS` | OpenAI request timeout. Defaults to `60`; Render defaults to `90` for screenshot analysis. |
 | `CORS_ORIGINS` | Comma-separated browser origins. Defaults to `*`. |
 | `EXECUTIVEOS_USERNAME` | Login username. Defaults to `admin`. |
 | `EXECUTIVEOS_PASSWORD` | Enables auth locally and is required on Render. Minimum 12 characters. |

@@ -7,6 +7,16 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+def _openai_timeout_seconds() -> float:
+    raw_timeout = os.getenv("OPENAI_TIMEOUT_SECONDS", "60")
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        logger.warning("Invalid OPENAI_TIMEOUT_SECONDS value %r; using 60 seconds", raw_timeout)
+        return 60.0
+    return max(10.0, timeout)
+
+
 class SuggestedUpdate(BaseModel):
     type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric", "task"]
     name: str = ""
@@ -107,8 +117,9 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         for image in image_inputs:
             user_content.append({"type": "input_image", "image_url": image})
 
-        response = OpenAI(timeout=20.0, max_retries=1).responses.parse(
-            model=os.getenv("OPENAI_MODEL", "gpt-5.6"),
+        model = os.getenv("OPENAI_MODEL", "gpt-5.6")
+        response = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2).responses.parse(
+            model=model,
             input=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
@@ -123,7 +134,10 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         # Capture must remain usable if the provider is unavailable. The exception is
         # logged server-side without exposing credentials or provider details to users.
         logger.warning(
-            "AI capture classification failed; using local fallback (%s)",
+            "AI capture classification failed; using local fallback (model=%s, images=%s, error_type=%s, error=%s)",
+            os.getenv("OPENAI_MODEL", "gpt-5.6"),
+            len(image_data) if isinstance(image_data, list) else int(bool(image_data)),
             type(error).__name__,
+            str(error)[:500],
         )
         return None

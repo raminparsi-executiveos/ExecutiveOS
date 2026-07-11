@@ -151,6 +151,7 @@ def test_screenshot_capture_validates_input_and_reports_missing_ai(monkeypatch):
 
 def test_text_is_classified_when_screenshot_analysis_is_unavailable(monkeypatch):
     monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory, image: None)
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
     response = client.post('/capture/classify', json={
         'text': 'Kyle will send the revised client-retention plan by Friday.',
         'image_data': 'data:image/png;base64,iVBORw0KGgo=',
@@ -161,6 +162,7 @@ def test_text_is_classified_when_screenshot_analysis_is_unavailable(monkeypatch)
     assert payload['classification_source'] == 'local_fallback'
     task_update = next(update for update in payload['suggested_updates'] if update['type'] == 'task')
     assert task_update['title'] == 'Kyle will send the revised client-retention plan by Friday'
+    assert any('Screenshot analysis timed out or failed' in follow_up for follow_up in payload['follow_ups'])
     assert any('The text entry was still reviewed.' in follow_up for follow_up in payload['follow_ups'])
 
 

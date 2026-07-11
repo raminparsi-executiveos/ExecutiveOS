@@ -30,7 +30,10 @@ RESOLUTION_WORDS = {"resolved", "complete", "completed", "done", "closed", "fixe
 def _screenshot_unavailable_message() -> str:
     if not os.getenv("OPENAI_API_KEY"):
         return "Screenshot analysis needs OPENAI_API_KEY configured on the backend."
-    return "Screenshot analysis could not reach a compatible OpenAI vision model. Check OPENAI_MODEL and backend logs."
+    return (
+        "Screenshot analysis timed out or failed through the OpenAI connection. "
+        "Check OPENAI_MODEL, OPENAI_TIMEOUT_SECONDS, model access, and backend logs."
+    )
 
 
 def _normalized_tokens(text: str) -> set[str]:
