@@ -36,9 +36,13 @@ def normalize_task_priority(value: Any) -> str:
         "": "medium",
         "med": "medium",
         "normal": "medium",
+        "next": "medium",
+        "soon": "medium",
         "urgent": "critical",
     }
-    return aliases.get(normalized, normalized)
+    if normalized in aliases:
+        return aliases[normalized]
+    return normalized if normalized in TASK_PRIORITIES else "medium"
 
 
 def normalize_task_attributes(attributes: dict[str, Any]) -> dict[str, Any]:

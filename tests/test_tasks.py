@@ -117,6 +117,27 @@ def test_capture_confirm_normalizes_task_status_and_priority_values():
     assert task['priority'] == 'medium'
 
 
+def test_capture_confirm_treats_unknown_ai_task_priority_as_medium():
+    saved = client.post('/capture/confirm', json={
+        'text': 'Screenshot capture from sales follow-up.',
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'task',
+            'title': 'Prepare reporting period follow-up',
+            'company': 'PEC',
+            'owner': 'Avery',
+            'status': 'open',
+            'priority': 'next_reporting_period',
+            'source_type': 'capture_text',
+        }],
+    })
+    assert saved.status_code == 200
+
+    tasks = client.get('/objects/tasks').json()['items']
+    task = next(item for item in tasks if item['title'] == 'Prepare reporting period follow-up')
+    assert task['priority'] == 'medium'
+
+
 def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions():
     meeting = client.post('/objects/meetings', json={'attributes': {
         'title': 'PEC client retention review',
