@@ -31,11 +31,15 @@ TABLES = [
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
     for table in TABLES:
-        op.add_column(table, sa.Column("created_at", sa.DateTime(timezone=True), nullable=True))
-        op.add_column(table, sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
-        op.create_index(op.f(f"ix_{table}_created_at"), table, ["created_at"], unique=False)
-        op.create_index(op.f(f"ix_{table}_updated_at"), table, ["updated_at"], unique=False)
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "created_at" not in columns:
+            op.add_column(table, sa.Column("created_at", sa.DateTime(timezone=True), nullable=True))
+            op.create_index(op.f(f"ix_{table}_created_at"), table, ["created_at"], unique=False)
+        if "updated_at" not in columns:
+            op.add_column(table, sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
+            op.create_index(op.f(f"ix_{table}_updated_at"), table, ["updated_at"], unique=False)
 
 
 def downgrade() -> None:

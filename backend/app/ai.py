@@ -108,7 +108,7 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
             user_content.append({"type": "input_image", "image_url": image})
 
         response = OpenAI(timeout=20.0, max_retries=1).responses.parse(
-            model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-5.6"),
             input=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {

@@ -22,7 +22,7 @@ def test_login_protects_memory_endpoints(monkeypatch):
     assert status_payload['configured'] is True
     assert all(status_payload['checks'].values())
     assert status_payload['ai']['openai_configured'] is False
-    assert status_payload['ai']['model']
+    assert status_payload['ai']['model'] == 'gpt-5.6'
     assert client.get('/briefing').status_code == 401
 
     rejected = client.post('/auth/login', json={'username': 'owner', 'password': 'wrong'})

@@ -71,7 +71,7 @@ The frontend defaults to `http://127.0.0.1:8000` for API calls. Set `VITE_API_UR
 | --- | --- | --- |
 | `DATABASE_URL` | No locally, yes on Render | Defaults to local SQLite. Render wires this to PostgreSQL. |
 | `OPENAI_API_KEY` | No | Enables AI capture classification and screenshot analysis. |
-| `OPENAI_MODEL` | No | Defaults to `gpt-5.4-mini`. Use a vision-capable model for screenshot capture. |
+| `OPENAI_MODEL` | No | Defaults to `gpt-5.6`. Use a vision-capable model for screenshot capture. |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins. Defaults to `*`. |
 | `EXECUTIVEOS_USERNAME` | Production | Defaults to `admin`. |
 | `EXECUTIVEOS_PASSWORD` | Production | Required on Render; must be at least 12 characters. |
