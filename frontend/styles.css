@@ -770,6 +770,53 @@ textarea, input {
   border-color: #64748b;
 }
 
+.capture-progress {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.capture-progress-header {
+  display: grid;
+  gap: 3px;
+}
+
+.capture-progress-header span {
+  color: #1d4ed8;
+  font-size: 0.92rem;
+}
+
+.capture-progress-track {
+  position: relative;
+  height: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.capture-progress-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 45%;
+  border-radius: inherit;
+  background: #2563eb;
+  animation: capture-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes capture-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(230%);
+  }
+}
+
 .screenshot-preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

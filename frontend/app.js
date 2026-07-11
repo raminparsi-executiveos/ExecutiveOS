@@ -406,6 +406,7 @@ let searchResults = null;
 let captureText = '';
 let screenshots = [];
 let screenshotsProcessing = false;
+let capturePhase = '';
 let searchQuery = '';
 let meetingQuery = '';
 let memoryType = 'people';
@@ -763,6 +764,7 @@ function render() {
       }
       try {
         screenshotsProcessing = true;
+        capturePhase = 'preparing';
         apiError = null;
         render();
         const loadedScreenshots = await Promise.all(files.map((file) => prepareScreenshot(file)));
@@ -774,6 +776,7 @@ function render() {
         setApiError(error.message);
       } finally {
         screenshotsProcessing = false;
+        capturePhase = '';
         if (event.target) event.target.value = '';
         render();
       }
@@ -797,6 +800,8 @@ function render() {
       button.addEventListener('click', async () => {
         if ((!captureText.trim() && !screenshots.length) || submitting || screenshotsProcessing) return;
         submitting = true;
+        capturePhase = screenshots.length ? 'analyzing_screenshots' : 'classifying_text';
+        classificationResult = null;
         render();
         try {
           classificationResult = await safeJsonFetch(apiUrl('/capture/classify'), {
@@ -815,6 +820,7 @@ function render() {
           setApiError(error.message);
         } finally {
           submitting = false;
+          capturePhase = '';
         }
         render();
       });
@@ -825,6 +831,7 @@ function render() {
       confirmButton.addEventListener('click', async () => {
         if (submitting) return;
         submitting = true;
+        capturePhase = 'saving_updates';
         render();
         try {
           const approvedUpdates = (classificationResult?.suggested_updates || []).filter((_, index) => selectedUpdateIndices.includes(index));
@@ -853,6 +860,7 @@ function render() {
           setApiError(error.message);
         } finally {
           submitting = false;
+          capturePhase = '';
         }
         render();
       });
@@ -1255,6 +1263,43 @@ function setApiError(error) {
   render();
 }
 
+function renderCaptureProgress() {
+  const screenshotsLabel = screenshots.length
+    ? `${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}`
+    : 'capture';
+  const states = {
+    preparing: {
+      title: 'Preparing screenshots',
+      detail: 'Compressing images in your browser before upload.',
+    },
+    analyzing_screenshots: {
+      title: 'Analyzing screenshot capture',
+      detail: `Uploading ${screenshotsLabel} and extracting structured updates. This can take up to a minute.`,
+    },
+    classifying_text: {
+      title: 'Classifying capture',
+      detail: 'Organizing the text into reviewable updates.',
+    },
+    saving_updates: {
+      title: 'Saving approved updates',
+      detail: 'Writing approved items into executive memory.',
+    },
+  };
+  const state = states[capturePhase];
+  if (!state) return '';
+  return `
+    <div class="capture-progress" role="status" aria-live="polite">
+      <div class="capture-progress-header">
+        <strong>${escapeHtml(state.title)}</strong>
+        <span>${escapeHtml(state.detail)}</span>
+      </div>
+      <div class="capture-progress-track" role="progressbar" aria-label="${escapeHtml(state.title)}">
+        <span></span>
+      </div>
+    </div>
+  `;
+}
+
 function renderPanel() {
   if (active === 'capture') {
     if (!captureObservability && !captureObservabilityLoading) {
@@ -1282,6 +1327,7 @@ function renderPanel() {
       ${screenshots.length ? `<div class="screenshot-preview-grid">${screenshots.map((screenshot, index) => `
         <div class="screenshot-preview"><img src="${screenshot.data}" alt="Screenshot ${index + 1} selected for capture" /><div><strong>${escapeHtml(screenshot.name)}</strong><p class="muted">${escapeHtml(`${screenshot.width || ''}${screenshot.width && screenshot.height ? ' x ' : ''}${screenshot.height || ''}${screenshot.compressedSize ? ` · ${formatBytes(screenshot.compressedSize)}` : ''}${screenshot.originalSize && screenshot.compressedSize && screenshot.compressedSize < screenshot.originalSize ? ` from ${formatBytes(screenshot.originalSize)}` : ''}`)}</p><button data-remove-screenshot="${index}" type="button" class="secondary">Remove</button></div></div>
       `).join('')}<button id="screenshots-clear" type="button" class="secondary">Remove all</button></div>` : ''}
+      ${renderCaptureProgress()}
       <button id="capture-submit" style="margin-top: 12px;" ${submitting || screenshotsProcessing || (!captureText.trim() && !screenshots.length) ? 'disabled' : ''}>${screenshotsProcessing ? 'Preparing screenshots...' : submitting ? 'Working…' : screenshots.length ? `Analyze and review ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}` : 'Classify and review updates'}</button>
       ${classificationResult ? `
         <div id="classification-review" style="margin-top: 12px;">
