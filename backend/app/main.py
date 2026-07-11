@@ -152,6 +152,12 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+@app.head("/")
+def root():
+    return {"status": "ok", "service": "ExecutiveOS API"}
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     try:
