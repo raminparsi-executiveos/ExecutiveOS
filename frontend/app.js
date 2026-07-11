@@ -284,7 +284,7 @@ function editableObjectAttributes(item) {
 function renderRelatedPanel(related) {
   const groups = Object.entries(related.related || {});
   return `
-    <div class="editor-panel related-panel">
+    <div id="memory-detail-panel" class="editor-panel related-panel">
       <div class="section-heading">
         <div>
           <h3>Related memory</h3>
@@ -429,6 +429,12 @@ function invalidateGeneratedViews() {
   briefing = null;
   meetingPrep = null;
   searchResults = null;
+}
+
+function scrollMemoryDetailIntoView() {
+  window.requestAnimationFrame(() => {
+    app.querySelector('#memory-detail-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
 }
 
 async function answerClarification(id) {
@@ -966,6 +972,7 @@ function render() {
         memoryRelated = null;
         memoryMessage = '';
         render();
+        scrollMemoryDetailIntoView();
       });
     });
 
@@ -973,6 +980,7 @@ function render() {
       button.addEventListener('click', async () => {
         if (submitting) return;
         const id = Number(button.getAttribute('data-related-object'));
+        let shouldScroll = false;
         submitting = true;
         render();
         try {
@@ -980,12 +988,14 @@ function render() {
           memoryEdit = null;
           memoryMessage = '';
           apiError = null;
+          shouldScroll = true;
         } catch (error) {
           setApiError(error.message);
         } finally {
           submitting = false;
         }
         render();
+        if (shouldScroll) scrollMemoryDetailIntoView();
       });
     });
 
@@ -1352,6 +1362,21 @@ function renderPanel() {
         </div>
       </details>
       ${memoryMessage ? `<p class="success" role="status">${escapeHtml(memoryMessage)}</p>` : ''}
+      ${memoryRelated ? renderRelatedPanel(memoryRelated) : ''}
+      ${memoryEdit ? `
+        <div id="memory-detail-panel" class="editor-panel">
+          <div class="section-heading">
+            <h3>${escapeHtml(memoryEdit.title)}</h3>
+            <button id="memory-cancel" type="button" class="secondary">Close</button>
+          </div>
+          <label for="memory-editor" class="sr-only">Object attributes JSON</label>
+          <textarea id="memory-editor" rows="12">${escapeHtml(memoryEdit.text)}</textarea>
+          <div class="button-row">
+            <button id="memory-save" type="button" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Save changes'}</button>
+            <button id="memory-delete" type="button" class="danger" ${submitting ? 'disabled' : ''}>${submitting ? 'Deleting…' : 'Delete object'}</button>
+          </div>
+        </div>
+      ` : ''}
       ${memoryLoading || !memoryObjects ? '<p>Loading memory…</p>' : `
         <div class="memory-list">
           ${memoryObjects.items.length ? memoryObjects.items.map((item) => `
@@ -1371,21 +1396,6 @@ function renderPanel() {
           `).join('') : '<p class="muted">No objects found for this type.</p>'}
         </div>
       `}
-      ${memoryRelated ? renderRelatedPanel(memoryRelated) : ''}
-      ${memoryEdit ? `
-        <div class="editor-panel">
-          <div class="section-heading">
-            <h3>${escapeHtml(memoryEdit.title)}</h3>
-            <button id="memory-cancel" type="button" class="secondary">Close</button>
-          </div>
-          <label for="memory-editor" class="sr-only">Object attributes JSON</label>
-          <textarea id="memory-editor" rows="12">${escapeHtml(memoryEdit.text)}</textarea>
-          <div class="button-row">
-            <button id="memory-save" type="button" ${submitting ? 'disabled' : ''}>${submitting ? 'Saving…' : 'Save changes'}</button>
-            <button id="memory-delete" type="button" class="danger" ${submitting ? 'disabled' : ''}>${submitting ? 'Deleting…' : 'Delete object'}</button>
-          </div>
-        </div>
-      ` : ''}
     `;
   }
 
