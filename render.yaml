@@ -19,6 +19,8 @@ services:
         value: high
       - key: OPENAI_TIMEOUT_SECONDS
         value: "90"
+      - key: CORS_ORIGINS
+        value: https://executiveos-frontend.onrender.com
       - key: EXECUTIVEOS_USERNAME
         value: admin
       - key: EXECUTIVEOS_PASSWORD

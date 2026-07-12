@@ -31,6 +31,7 @@ from .models import (
     ProvenanceRecord,
     RevisionRecord,
     ReviewAlert,
+    ResolvableItem,
     StrategicIssue,
     Task,
 )
@@ -52,6 +53,7 @@ from .schemas import (
     LeadershipReviewProposalRequest,
     LoginRequest,
     MeetingPrepRequest,
+    ResolvableItemResolutionRequest,
     ReviewAlertResolutionRequest,
     SearchRequest,
     UpdateObjectRequest,
@@ -98,6 +100,13 @@ from .roadmap_services import (
     record_revision,
     resolve_alert,
     update_search_conversation,
+)
+from .resolution_service import (
+    list_resolvable_items,
+    reopen_resolvable_item,
+    resolvable_item_or_404,
+    resolve_resolvable_item,
+    serialize_resolvable_item,
 )
 from .memory import (
     SEARCH_CONFIG,
@@ -438,6 +447,56 @@ def reopen_task_endpoint(task_id: int, db: Session = Depends(get_db), _user: str
     return {"message": "Task reopened", "task": _serialize_model(task)}
 
 
+@app.get("/resolvable-items")
+def get_resolvable_items(
+    status: str = Query(default="open", max_length=50),
+    company: str = Query(default="", max_length=100),
+    item_type: str = Query(default="", max_length=50),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    items = list_resolvable_items(db, status=status, company=company, item_type=item_type, limit=limit)
+    db.commit()
+    return {"items": [serialize_resolvable_item(item) for item in items], "total": len(items)}
+
+
+@app.post("/resolvable-items/{item_id}/resolve")
+def resolve_resolvable_item_endpoint(
+    item_id: int,
+    payload: ResolvableItemResolutionRequest | None = None,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    item = resolvable_item_or_404(db, item_id)
+    try:
+        resolve_resolvable_item(db, item, actor=_user, source="manual_control", note=(payload.note if payload else ""))
+        db.commit()
+        db.refresh(item)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Item could not be resolved") from error
+    return {"message": "Item resolved", "item": serialize_resolvable_item(item)}
+
+
+@app.post("/resolvable-items/{item_id}/reopen")
+def reopen_resolvable_item_endpoint(
+    item_id: int,
+    payload: ResolvableItemResolutionRequest | None = None,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    item = resolvable_item_or_404(db, item_id)
+    try:
+        reopen_resolvable_item(db, item, actor=_user, note=(payload.note if payload else ""))
+        db.commit()
+        db.refresh(item)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Item could not be reopened") from error
+    return {"message": "Item reopened", "item": serialize_resolvable_item(item)}
+
+
 @app.delete("/objects/{object_type}/{object_id}")
 def delete_object(
     object_type: str,
@@ -604,14 +663,134 @@ def get_executive_inbox(
     clarification_status = status
     review_status = "new" if status == "open" else status
     items = []
+    today = date.today()
     if source_type in {"", "clarification"}:
         items.extend(executive_inbox_items(db, refresh=refresh, status=clarification_status, company=company))
     if source_type in {"", "leadership_review"}:
         items.extend(leadership_inbox_items(db, status=review_status, company=company))
+    if source_type in {"", "task"}:
+        task_query = db.query(Task)
+        if status == "open":
+            task_query = task_query.filter(Task.status.in_(OPEN_TASK_STATUSES))
+        elif status:
+            task_query = task_query.filter(Task.status == status)
+        if company:
+            task_query = task_query.filter(Task.company == company)
+        for task in task_query.order_by(Task.updated_at.desc()).limit(100).all():
+            score = 60 if task.priority in {"critical", "high"} else 35
+            reasons = [f"{task.priority or 'medium'} priority", task.status or "open"]
+            if task_is_overdue(task, today):
+                score += 45
+                reasons.append("overdue")
+            if not task.owner:
+                score += 20
+                reasons.append("missing owner")
+            items.append({
+                "id": f"task:{task.id}",
+                "source_type": "task",
+                "source_id": task.id,
+                "company": task.company or "",
+                "title": task.title,
+                "summary": task.description or task.next_action or "Open commitment.",
+                "priority": task.priority or "medium",
+                "score": score,
+                "score_reasons": reasons,
+                "created_at": task.created_at.isoformat() if task.created_at else "",
+                "freshness": task.status,
+                "suggested_action": task.next_action or "Complete, delegate, or update this commitment.",
+                "available_actions": ["complete", "open_source"],
+                "status": task.status,
+                "owner": task.owner or "",
+                "due_date": task.due_date or "",
+                "supporting_sources": [{"source_type": task.source_type, "source_id": task.source_id, "summary": task.source_summary}],
+            })
+    if source_type in {"", "review_alert"}:
+        alert_query = db.query(ReviewAlert)
+        if status == "open":
+            alert_query = alert_query.filter(ReviewAlert.status == "open")
+        elif status:
+            alert_query = alert_query.filter(ReviewAlert.status == status)
+        for alert in alert_query.order_by(ReviewAlert.updated_at.desc()).limit(100).all():
+            if company and company.lower() not in (alert.title + " " + alert.description).lower():
+                continue
+            score = {"critical": 90, "high": 75, "medium": 50, "low": 25}.get(alert.severity, 50)
+            items.append({
+                "id": f"review_alert:{alert.id}",
+                "source_type": "review_alert",
+                "source_id": alert.id,
+                "company": company,
+                "title": alert.title,
+                "summary": alert.description,
+                "priority": alert.severity,
+                "score": score,
+                "score_reasons": [alert.alert_type, alert.severity],
+                "created_at": alert.created_at.isoformat() if alert.created_at else "",
+                "freshness": alert.status,
+                "suggested_action": "Resolve or dismiss the review alert.",
+                "available_actions": ["resolve", "dismiss", "open_source"],
+                "status": alert.status,
+                "owner": "",
+                "due_date": "",
+                "supporting_sources": alert.evidence or [],
+            })
+    if source_type in {"", "integration_inbox"}:
+        integration_query = db.query(IntegrationInboxItem)
+        if status == "open":
+            integration_query = integration_query.filter(IntegrationInboxItem.status == "new")
+        elif status:
+            integration_query = integration_query.filter(IntegrationInboxItem.status == status)
+        for item in integration_query.order_by(IntegrationInboxItem.updated_at.desc()).limit(100).all():
+            items.append({
+                "id": f"integration_inbox:{item.id}",
+                "source_type": "integration_inbox",
+                "source_id": item.id,
+                "company": "",
+                "title": item.source_title or item.source_identifier or "Integration item",
+                "summary": item.extracted_text[:240] if item.extracted_text else "Review staged integration updates.",
+                "priority": "medium",
+                "score": 45,
+                "score_reasons": [item.source_type, "pending approval"],
+                "created_at": item.created_at.isoformat() if item.created_at else "",
+                "freshness": item.status,
+                "suggested_action": "Approve or dismiss staged memory updates.",
+                "available_actions": ["approve", "dismiss", "open_source"],
+                "status": item.status,
+                "owner": "",
+                "due_date": "",
+                "supporting_sources": [{"source_type": item.source_type, "source_id": item.source_identifier}],
+            })
+    if source_type in {"", "resolvable_item", "risk", "meeting_action"}:
+        for item in list_resolvable_items(db, status=("open" if status == "open" else status), company=company, include_sync=True, limit=100):
+            if source_type in {"risk", "meeting_action"} and item.item_type != source_type:
+                continue
+            score = 58 if item.item_type == "risk" else 38
+            items.append({
+                "id": f"resolvable_item:{item.id}",
+                "source_type": "resolvable_item",
+                "source_id": item.id,
+                "item_type": item.item_type,
+                "company": item.company or "",
+                "title": item.display_text,
+                "summary": f"{item.item_type.replace('_', ' ').title()} from {item.parent_type} #{item.parent_id}.",
+                "priority": "high" if item.item_type == "risk" else "medium",
+                "score": score,
+                "score_reasons": ["durable open item", item.item_type.replace("_", " ")],
+                "created_at": item.created_at.isoformat() if item.created_at else "",
+                "freshness": item.status,
+                "suggested_action": "Resolve, reopen, or convert to a tracked task.",
+                "available_actions": ["resolve", "open_source"],
+                "status": item.status,
+                "owner": "",
+                "due_date": "",
+                "supporting_sources": [{"source_type": item.parent_type, "source_id": item.parent_id}],
+            })
     if refresh:
         db.commit()
     if source_type:
-        items = [item for item in items if item["source_type"] == source_type]
+        items = [
+            item for item in items
+            if item["source_type"] == source_type or item.get("item_type") == source_type
+        ]
     items = sorted(items, key=lambda item: item.get("score", 0), reverse=True)
     return {"items": items, "total": len(items)}
 
@@ -979,15 +1158,23 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         limit=5,
     )
     db.commit()
-    recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
-    resolution_contexts = [capture.raw_text for capture in recent_captures]
-
-    def action_is_resolved(action: str) -> bool:
-        return any(
-            capture_resolves_waiting_item(context, action)
-            or capture_explicitly_resolves_item(context, action)
-            for context in resolution_contexts
+    open_resolvables = list_resolvable_items(db, status="open", company=company_name or "", include_sync=True, limit=500)
+    all_resolvables = list_resolvable_items(db, status="", company=company_name or "", include_sync=False, limit=1000)
+    resolved_meeting_actions = {
+        (str(item.parent_id), item.display_text.lower())
+        for item in all_resolvables
+        if item.item_type == "meeting_action" and item.status == "resolved"
+    }
+    tasks = [
+        task for task in tasks
+        if not (
+            task.source_type == "meeting"
+            and (str(task.source_id), task.title.lower()) in resolved_meeting_actions
         )
+    ]
+    meeting_action_items = [item for item in open_resolvables if item.item_type == "meeting_action"]
+    risk_resolvables = [item for item in open_resolvables if item.item_type == "risk"]
+    recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
 
     capture_candidates = scoped_items(CaptureRecord)
     minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
@@ -1003,9 +1190,8 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     action_items = [
         item for item in list(dict.fromkeys(
         [task.title for task in tasks] +
-        [item for meeting in meetings for item in (meeting.action_items or [])]
+        [item.display_text for item in meeting_action_items]
         ))
-        if not action_is_resolved(str(item))
     ]
     task_by_title = {task.title.lower(): task for task in tasks}
     for meeting in meetings:
@@ -1028,8 +1214,17 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
             "label": title,
             "record_type": "meeting_action",
             "status": "waiting",
-            "resolvable": True,
+            "resolvable": False,
         }
+        resolvable = next((item for item in meeting_action_items if item.display_text.lower() == str(title).lower()), None)
+        if resolvable:
+            detail.update({
+                "record_id": resolvable.id,
+                "resolvable_item_id": resolvable.id,
+                "company": resolvable.company or "",
+                "status": resolvable.status or "open",
+                "resolvable": True,
+            })
         if task:
             detail.update({
                 "type": "task",
@@ -1045,12 +1240,19 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         return detail
 
     risks = [
-        risk for risk in list(dict.fromkeys(risk for item in [*issues, *projects] for risk in (item.risks or [])))
-        if not action_is_resolved(str(risk))
+        risk.display_text for risk in risk_resolvables
     ]
     risk_details = [
-        {"label": risk, "record_type": "risk", "status": "active", "resolvable": True}
-        for risk in risks
+        {
+            "label": risk.display_text,
+            "record_type": "risk",
+            "record_id": risk.id,
+            "resolvable_item_id": risk.id,
+            "company": risk.company or "",
+            "status": risk.status or "open",
+            "resolvable": True,
+        }
+        for risk in risk_resolvables
     ]
 
     def topical(labels: list[str]) -> list[str]:

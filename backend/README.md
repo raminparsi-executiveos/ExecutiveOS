@@ -95,6 +95,9 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `GET` | `/capture/observability` | Summarizes capture classification sources, fallback rate, image-unavailable count, saved updates, and recent capture previews. |
 | `POST` | `/tasks/{task_id}/complete` | Marks a task complete and keeps it searchable. |
 | `POST` | `/tasks/{task_id}/reopen` | Reopens a completed or cancelled task. |
+| `GET` | `/resolvable-items` | Lists durable risks, meeting actions, and other resolvable child items by status, company, and type. |
+| `POST` | `/resolvable-items/{item_id}/resolve` | Resolves a durable child item by stable ID with an optional note. |
+| `POST` | `/resolvable-items/{item_id}/reopen` | Reopens a durable child item by stable ID. |
 | `POST` | `/meeting-prep` | Generates agenda and context for a meeting. |
 | `POST` | `/search` | Answers a natural-language question over memory. |
 
@@ -104,7 +107,9 @@ Object listing accepts an optional `company` query parameter for company-scoped 
 
 Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`, with priorities `critical`, `high`, `medium`, and `low`. Approved capture task suggestions and meeting action items create task records without deleting the original meeting action-item text.
 
-The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
+Resolvable items store stable child records for parent arrays such as meeting actions and risks. Parent arrays remain for audit compatibility; `resolvable_items.status` is the source of truth for whether those items appear in briefing, meeting prep, and Executive Inbox. Natural-language captures may resolve a single matching durable item, but UI controls resolve by stable ID.
+
+The briefing endpoint ranks tasks, decisions, durable risks/actions, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
 
 Clarifications are deterministic, durable questions about material missing context, stale records, contradictions, ambiguous action language, and disconnected decisions. They appear in `/executive-inbox`, the `clarifications_needed` briefing section, and relevant meeting prep questions. Answering a clarification creates a preview; confirming it is the separate operation that updates stable target records and creates revision history.
 

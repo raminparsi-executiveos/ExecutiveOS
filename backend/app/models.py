@@ -242,6 +242,24 @@ class ReviewAlert(TimestampMixin, Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
 
+class ResolvableItem(TimestampMixin, Base):
+    __tablename__ = "resolvable_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_type = Column(String, index=True, nullable=False)
+    parent_id = Column(Integer, index=True, nullable=False)
+    item_type = Column(String, default="action", index=True)
+    display_text = Column(Text, nullable=False)
+    status = Column(String, default="open", index=True)
+    company = Column(String, default="", index=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    resolved_by = Column(String, default="")
+    resolution_source = Column(String, default="")
+    resolution_note = Column(Text, default="")
+    reopened_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    dedupe_key = Column(String, unique=True, index=True, nullable=False)
+
+
 class LeadershipReview(TimestampMixin, Base):
     __tablename__ = "leadership_reviews"
 

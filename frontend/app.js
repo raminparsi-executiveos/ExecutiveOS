@@ -155,15 +155,18 @@ function isCompletableTaskItem(item) {
 function isResolvableItem(item) {
   const recordType = String(item?.record_type || '');
   const status = String(item?.status || '').toLowerCase();
+  const itemId = item?.resolvable_item_id || (['risk', 'meeting_action'].includes(recordType) ? item?.record_id : '');
   return !isCompletableTaskItem(item)
     && !['completed', 'cancelled', 'resolved'].includes(status)
+    && Boolean(itemId)
     && (item?.resolvable || ['risk', 'meeting_action'].includes(recordType));
 }
 
 function actionControlButton(item) {
   if (isResolvableItem(item)) {
-    const label = item.title || item.label || '';
-    return `<button type="button" class="item-action-button resolve-action" data-resolve-item="${escapeHtml(label)}" ${submitting ? 'disabled' : ''}>✓ Resolve</button>`;
+    const recordType = String(item?.record_type || '');
+    const itemId = item.resolvable_item_id || (['risk', 'meeting_action'].includes(recordType) ? item.record_id : '');
+    return `<button type="button" class="item-action-button resolve-action" data-resolve-item="${escapeHtml(itemId)}" ${submitting ? 'disabled' : ''}>✓ Resolve</button>`;
   }
   if (!isCompletableTaskItem(item)) return '';
   const taskId = item.task_id || item.record_id;
@@ -426,6 +429,26 @@ function renderInboxItem(item) {
           <button type="button" class="secondary" data-apply-leadership-proposals="${escapeHtml(item.source_id)}">Create follow-ups</button>
           <button type="button" class="secondary" data-dismiss-leadership="${escapeHtml(item.source_id)}">Dismiss</button>
         </div>
+      </article>
+    `;
+  }
+  if (item.source_type !== 'clarification') {
+    const actions = [
+      item.source_type === 'task' ? `<button type="button" class="secondary" data-complete-task="${escapeHtml(item.source_id)}">Complete</button>` : '',
+      item.source_type === 'resolvable_item' ? `<button type="button" class="secondary" data-resolve-item="${escapeHtml(item.source_id)}">Resolve</button>` : '',
+    ].filter(Boolean).join('');
+    return `
+      <article class="inbox-item">
+        <div class="dashboard-item-main">
+          ${renderCompanyChip(item.company)}
+          <strong>${escapeHtml(item.title || humanize(item.source_type || 'Inbox item'))}</strong>
+          <span class="score-pill">${escapeHtml(item.priority || 'medium')}</span>
+        </div>
+        <p>${escapeHtml(item.summary || item.suggested_action || 'Review this item.')}</p>
+        ${item.suggested_action ? `<small>Next: ${escapeHtml(item.suggested_action)}</small>` : ''}
+        ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+        ${sources.length ? `<details class="inbox-evidence"><summary>Evidence</summary>${renderList(sources.map((source) => source.label || source.text || source.summary || `${source.source_type || 'source'} #${source.source_id || ''}`))}</details>` : ''}
+        ${actions ? `<div class="inbox-actions">${actions}</div>` : ''}
       </article>
     `;
   }
@@ -799,20 +822,16 @@ async function completeTaskFromControl(taskId) {
   render();
 }
 
-async function resolveItemFromControl(label) {
-  const title = String(label || '').trim();
-  if (!title || submitting) return;
+async function resolveItemFromControl(itemId) {
+  const id = String(itemId || '').trim();
+  if (!id || submitting) return;
   submitting = true;
   render();
   try {
-    await safeJsonFetch(apiUrl('/capture/confirm'), {
+    await safeJsonFetch(apiUrl(`/resolvable-items/${id}/resolve`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: `Mark ${title} as resolved`,
-        approved_updates: [],
-        classification_source: 'manual',
-      }),
+      body: JSON.stringify({ note: 'Resolved from briefing or meeting prep control.' }),
     });
     memoryObjects = null;
     executiveInbox = null;
@@ -831,6 +850,7 @@ async function resolveItemFromControl(label) {
       briefing = null;
       meetingPrep = null;
     }
+    memoryMessage = active === 'memory' ? 'Item resolved.' : '';
   } catch (error) {
     setApiError(error.message);
   } finally {

@@ -84,6 +84,10 @@ class ReviewAlertResolutionRequest(BaseModel):
     resolution: str = Field(default="", max_length=2_000)
 
 
+class ResolvableItemResolutionRequest(BaseModel):
+    note: str = Field(default="", max_length=2_000)
+
+
 class DashboardConfigRequest(BaseModel):
     modules: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
 

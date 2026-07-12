@@ -16,7 +16,8 @@ The app ships the core executive-memory workflows plus roadmap support surfaces:
 8. **Integration Inbox**: stage Google Calendar event data and uploaded-document text for review before approval.
 9. **Clarifications Needed**: review high-value questions about missing owners, stale assumptions, contradictions, ambiguous action language, and disconnected records before confirming any memory changes.
 10. **Leadership Advisor**: generate evidence-grounded leadership reviews after approved captures, on demand, or through a nightly run; review or approve proposed follow-ups before any durable memory change.
-11. **Memory Backup**: export durable memory to a JSON backup or import a reviewed backup in merge or replace mode.
+11. **Durable Resolution Tracking**: resolve and reopen risks, meeting actions, and other follow-up items by stable ID so completed items stay out of briefing and meeting prep.
+12. **Memory Backup**: export durable memory to a JSON backup or import a reviewed backup in merge or replace mode.
 
 ## Tech Stack
 
@@ -124,6 +125,9 @@ Important endpoints:
 - `POST /integration-inbox`
 - `POST /integration-inbox/{item_id}/approve`
 - `GET /executive-inbox`
+- `GET /resolvable-items`
+- `POST /resolvable-items/{item_id}/resolve`
+- `POST /resolvable-items/{item_id}/reopen`
 - `GET /leadership-reviews`
 - `GET /leadership-reviews/{review_id}`
 - `POST /leadership-reviews/generate`
@@ -148,7 +152,7 @@ Important endpoints:
 
 Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
 
-Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` remain on the meeting record for audit, and linked task records are completed explicitly rather than by fuzzy text deletion. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
+Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` and risk arrays remain on parent records for audit, while durable `resolvable_items` child records drive open/resolved visibility in briefing and meeting prep. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
 
 Object listing supports `?company=...` for company-scoped memory browsing. The Memory screen includes the same filter so related company context can be reviewed without switching to company dashboards.
 
@@ -163,6 +167,16 @@ Memory backups use a versioned JSON envelope containing durable memory tables, p
 Related memory views combine explicit `linked_*` fields, reciprocal links, task/meeting source links, attendees, and same-company context so related records can be inspected without duplicating memory.
 
 Capture observability summarizes recent classification sources, fallback frequency, image-unavailable events, and saved-update rates so AI quality and local fallback usage can be monitored.
+
+## Release Checklist
+
+- Run `python -m pytest -q`.
+- Run `cd frontend && npm run build` or at least the bundled `esbuild` check when Node is unavailable.
+- Apply migrations with `alembic upgrade head` or deploy through the backend Docker startup command.
+- Verify `/health`, `/auth/status`, `/briefing`, `/executive-inbox`, and `/capture/observability` on the deployed backend.
+- Confirm Render has `EXECUTIVEOS_PASSWORD`, `SESSION_SECRET`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_SECONDS`, `OPENAI_IMAGE_DETAIL`, `DATABASE_URL`, and production `CORS_ORIGINS`.
+- Confirm frontend `VITE_API_URL` points to the backend, not the static frontend URL.
+- Trigger or schedule the nightly Leadership Advisor endpoint after auth is configured.
 
 ## Testing and Build
 

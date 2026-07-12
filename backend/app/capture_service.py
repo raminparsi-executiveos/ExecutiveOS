@@ -14,6 +14,7 @@ from .memory import (
 )
 from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document, Task
 from .roadmap_services import ensure_provenance, record_revision
+from .resolution_service import resolve_items_from_capture_text
 from .tasks import OPEN_TASK_STATUSES, complete_task, ensure_tasks_for_meeting_action_items, upsert_task_from_update
 
 
@@ -491,6 +492,7 @@ def _record_capture_change(db: Session, record_type: str, instance: Any, text: s
 def _apply_explicit_resolution(db: Session, text: str) -> None:
     if not _is_explicit_resolution(text):
         return
+    resolve_items_from_capture_text(db, text, actor="user")
     target = _resolution_target_from_text(text)
     if not target:
         return
@@ -666,6 +668,7 @@ def _apply_approved_updates(
             )
 
     _apply_explicit_resolution(db, text)
+    resolve_items_from_capture_text(db, text, actor="user")
 
     db.add(CaptureRecord(
         raw_text=text,

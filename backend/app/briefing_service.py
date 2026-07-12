@@ -3,11 +3,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .capture_service import capture_explicitly_resolves_item, capture_resolves_waiting_item
 from .clarification_service import briefing_clarification_items
 from .leadership_service import latest_leadership_review, serialize_leadership_review
 from .memory import _result_summary, company_label_for_text
-from .models import BriefingView, CaptureRecord, Decision, Meeting, Metric, Person, Project, StrategicIssue, Task
+from .models import BriefingView, CaptureRecord, Decision, Meeting, Metric, Person, Project, ResolvableItem, StrategicIssue, Task
+from .resolution_service import list_resolvable_items
 from .tasks import OPEN_TASK_STATUSES, task_is_overdue
 
 
@@ -188,6 +188,26 @@ def _risk_item(item: StrategicIssue | Project, risk: str) -> dict[str, Any]:
     )
 
 
+def _resolvable_item(item: ResolvableItem) -> dict[str, Any]:
+    score = 48 if item.item_type == "risk" else 35
+    return _dashboard_item(
+        item,
+        record_type=item.item_type,
+        title=item.display_text,
+        why="This item is open until resolved explicitly.",
+        score=score,
+        next_action="Resolve, reopen, or convert to a tracked task after review.",
+        company=item.company or "",
+        status=item.status or "open",
+        source={"type": item.parent_type, "id": str(item.parent_id), "summary": item.parent_type.replace("_", " ").title()},
+        score_reasons=["durable open item", item.item_type.replace("_", " ")],
+    ) | {
+        "record_id": item.id,
+        "resolvable_item_id": item.id,
+        "resolvable": item.status in {"open", "reopened"},
+    }
+
+
 def _changed_item(item: Any, record_type: str) -> dict[str, Any]:
     title = getattr(item, "title", "") or getattr(item, "name", "") or f"{record_type.title()} update"
     if isinstance(item, CaptureRecord):
@@ -249,61 +269,34 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     tasks = db.query(Task).order_by(Task.id.desc()).all()
     metrics = db.query(Metric).order_by(Metric.id.desc()).all()
     open_tasks = [task for task in tasks if task.status in OPEN_TASK_STATUSES]
+    open_resolvables = list_resolvable_items(db, status="open", include_sync=True, limit=500)
+    all_resolvables = list_resolvable_items(db, status="", include_sync=False, limit=1000)
+    resolved_meeting_actions = {
+        (str(item.parent_id), item.display_text.lower())
+        for item in all_resolvables
+        if item.item_type == "meeting_action" and item.status == "resolved"
+    }
 
     recent_captures = db.query(CaptureRecord).order_by(CaptureRecord.created_at.desc()).limit(25).all()
-    resolution_contexts = [capture.raw_text for capture in recent_captures]
-    resolution_contexts.extend(
-        " ".join([
-            person.name or "",
-            person.role or "",
-            person.company or "",
-            " ".join(person.responsibilities or []),
-            " ".join(person.current_priorities or []),
-            " ".join(person.performance_notes or []),
-        ])
-        for person in people
-    )
-
-    def action_is_resolved(action: str) -> bool:
-        return any(
-            capture_resolves_waiting_item(context, action)
-            or capture_explicitly_resolves_item(context, action)
-            for context in resolution_contexts
-        )
-
     visible_open_tasks = [
         task for task in open_tasks
         if not (
             task.source_type == "meeting"
-            and task.status in {"waiting", "blocked", "open"}
-            and action_is_resolved(task.title)
+            and (str(task.source_id), task.title.lower()) in resolved_meeting_actions
         )
     ]
     task_items = [_task_item(task, today, username) for task in visible_open_tasks]
 
     legacy_waiting = [
-        _dashboard_item(
-            meeting,
-            record_type="meeting_action",
-            title=str(action),
-            why="Legacy meeting action item has not been converted to a linked completed task.",
-            score=30,
-            next_action="Convert to or complete a task after review.",
-            company=meeting.company or "",
-            status="waiting",
-            source={"type": "meeting", "id": str(meeting.id), "summary": meeting.title},
-            score_reasons=["legacy waiting item"],
-        )
-        for meeting in all_meetings
-        for action in (meeting.action_items or [])
-        if not action_is_resolved(str(action))
-        and not any(task.title.lower() == str(action).lower() and task.source_type == "meeting" for task in tasks)
+        _resolvable_item(item)
+        for item in open_resolvables
+        if item.item_type == "meeting_action"
+        and not any(task.title.lower() == item.display_text.lower() and task.source_type == "meeting" for task in tasks)
     ]
     risk_items = [
-        _risk_item(item, risk)
-        for item in [*issues, *projects]
-        for risk in (item.risks or [])
-        if not action_is_resolved(str(risk))
+        _resolvable_item(item)
+        for item in open_resolvables
+        if item.item_type == "risk"
     ]
     context_priorities = [
         _dashboard_item(
