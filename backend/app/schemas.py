@@ -128,6 +128,16 @@ class ClarificationCloseRequest(BaseModel):
     scope: str = Field(default="", max_length=300)
 
 
+class LeadershipReviewGenerateRequest(BaseModel):
+    review_type: str = Field(default="manual", max_length=20)
+    company: str = Field(default="", max_length=100)
+    force: bool = False
+
+
+class LeadershipReviewProposalRequest(BaseModel):
+    finding_indexes: list[int] = Field(default_factory=list, max_length=20)
+
+
 class BackupImportRequest(BaseModel):
     backup: dict[str, Any] = Field(default_factory=dict)
     mode: str = Field(default="merge", max_length=20)

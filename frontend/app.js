@@ -277,6 +277,35 @@ function renderCollapsedPrepSection(title, items, tone = 'neutral', emptyMessage
   `;
 }
 
+function leadershipFindingItems(review) {
+  return (review?.leadership_signals || review?.findings || []).map((finding) => ({
+    title: finding.finding || 'Leadership signal',
+    label: finding.finding || 'Leadership signal',
+    company: review.company || finding.company || '',
+    status: finding.severity || 'advisor',
+    why_it_matters: [
+      finding.category ? humanize(finding.category) : '',
+      finding.supported_facts?.[0] || '',
+    ].filter(Boolean).join(' · '),
+    recommended_next_action: finding.recommended_action || '',
+    score_reasons: finding.leadership_principles || [],
+    record_type: 'leadership_review',
+    record_id: review.id,
+  }));
+}
+
+function renderLeadershipReviewSummary(review) {
+  if (!review) return '';
+  const findings = leadershipFindingItems(review).slice(0, 3);
+  return `
+    <aside class="focus leadership-review-card">
+      <strong>Leadership Advisor</strong>
+      <p>${escapeHtml(review.executive_summary || 'Advisor review is ready.')}</p>
+      ${findings.length ? renderList(findings) : ''}
+    </aside>
+  `;
+}
+
 function prepItems(prep, detailKey, fallbackKey) {
   return prep[detailKey]?.length ? prep[detailKey] : prep[fallbackKey];
 }
@@ -379,6 +408,27 @@ function renderRelatedPanel(related) {
 function renderInboxItem(item) {
   const reasons = Array.isArray(item.score_reasons) ? item.score_reasons.filter(Boolean) : [];
   const sources = Array.isArray(item.supporting_sources) ? item.supporting_sources.filter(Boolean) : [];
+  if (item.source_type === 'leadership_review') {
+    return `
+      <article class="inbox-item">
+        <div class="dashboard-item-main">
+          ${renderCompanyChip(item.company)}
+          <strong>${escapeHtml(item.title || 'Leadership review ready')}</strong>
+          <span class="score-pill">${escapeHtml(item.priority || 'advisor')}</span>
+        </div>
+        <p>${escapeHtml(item.summary || item.suggested_action || 'Review leadership implications and proposed follow-ups.')}</p>
+        ${item.suggested_action ? `<small>Next: ${escapeHtml(item.suggested_action)}</small>` : ''}
+        ${reasons.length ? `<div class="score-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+        ${item.strategic_questions?.length ? `<details class="inbox-evidence"><summary>Strategic questions</summary>${renderList(item.strategic_questions)}</details>` : ''}
+        ${sources.length ? `<details class="inbox-evidence"><summary>Evidence</summary>${renderList(sources.map((source) => source.label || source.text || source.summary || `${source.object_type || source.source_type || 'source'} #${source.object_id || source.source_id || ''}`))}</details>` : ''}
+        <div class="inbox-actions">
+          <button type="button" class="secondary" data-review-leadership="${escapeHtml(item.source_id)}">Reviewed</button>
+          <button type="button" class="secondary" data-apply-leadership-proposals="${escapeHtml(item.source_id)}">Create follow-ups</button>
+          <button type="button" class="secondary" data-dismiss-leadership="${escapeHtml(item.source_id)}">Dismiss</button>
+        </div>
+      </article>
+    `;
+  }
   const actionPanel = executiveInboxAction?.id === String(item.source_id) ? renderClarificationActionPanel(item) : '';
   return `
     <article class="inbox-item">
@@ -559,7 +609,7 @@ async function loadExecutiveInbox() {
   executiveInboxLoading = true;
   executiveInboxMessage = '';
   try {
-    executiveInbox = await safeJsonFetch(apiUrl('/executive-inbox?source_type=clarification'));
+    executiveInbox = await safeJsonFetch(apiUrl('/executive-inbox'));
     apiError = null;
   } catch (error) {
     setApiError(error.message);
@@ -676,6 +726,37 @@ async function confirmClarificationAnswer(id) {
     });
     executiveInboxMessage = 'Clarification answered.';
     executiveInboxAction = null;
+    invalidateGeneratedViews();
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+}
+
+async function updateLeadershipReview(id, action) {
+  if (!id || submitting) return;
+  submitting = true;
+  render();
+  try {
+    const path = action === 'proposals'
+      ? `/leadership-reviews/${id}/proposals`
+      : `/leadership-reviews/${id}/${action}`;
+    const options = action === 'proposals'
+      ? {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finding_indexes: [] }),
+        }
+      : { method: 'POST' };
+    const result = await safeJsonFetch(apiUrl(path), options);
+    executiveInboxMessage = action === 'dismiss'
+      ? 'Leadership review dismissed.'
+      : action === 'proposals'
+        ? `${result.applied?.length || 0} advisor follow-up${result.applied?.length === 1 ? '' : 's'} created.`
+        : 'Leadership review marked reviewed.';
     invalidateGeneratedViews();
     apiError = null;
   } catch (error) {
@@ -814,6 +895,21 @@ function render() {
     });
     app.querySelectorAll('[data-dismiss-clarification]').forEach((button) => {
       button.addEventListener('click', () => openClarificationAction(button.getAttribute('data-dismiss-clarification'), 'dismiss'));
+    });
+    app.querySelectorAll('[data-review-leadership]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await updateLeadershipReview(button.getAttribute('data-review-leadership'), 'review');
+      });
+    });
+    app.querySelectorAll('[data-dismiss-leadership]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await updateLeadershipReview(button.getAttribute('data-dismiss-leadership'), 'dismiss');
+      });
+    });
+    app.querySelectorAll('[data-apply-leadership-proposals]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await updateLeadershipReview(button.getAttribute('data-apply-leadership-proposals'), 'proposals');
+      });
     });
     app.querySelectorAll('[data-clarification-form]').forEach((form) => {
       form.addEventListener('submit', async (event) => {
@@ -1459,7 +1555,11 @@ function renderPanel() {
           ${classificationResult.suggested_updates.length ? `<button id="capture-confirm" style="margin-top: 12px;" ${submitting || selectedUpdateIndices.length === 0 ? 'disabled' : ''}>${submitting ? 'Saving…' : `Save ${selectedUpdateIndices.length} approved update${selectedUpdateIndices.length === 1 ? '' : 's'}`}</button>` : ''}
         </div>
       ` : ''}
-      ${captureResult ? `<p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>` : ''}
+      ${captureResult ? `
+        <p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>
+        ${captureResult.leadership_review ? renderLeadershipReviewSummary(captureResult.leadership_review) : ''}
+        ${captureResult.leadership_review_error ? `<p class="muted">${escapeHtml(captureResult.leadership_review_error)}</p>` : ''}
+      ` : ''}
       ${captureObservability ? `
         <details class="backup-panel">
           <summary><span>Capture quality</span></summary>
@@ -1492,7 +1592,9 @@ function renderPanel() {
     }
 
     if (!briefing) return '<p>Loading briefing…</p>';
+    const leadershipItems = leadershipFindingItems(briefing.leadership_advisor);
     const commandSections = [
+      ['Leadership Advisor', leadershipItems, 'leadership'],
       ['Needs Your Attention', briefing.needs_your_attention, 'needs-attention'],
       ['Delegate or Follow Up', briefing.delegate_or_follow_up, 'delegate'],
       ['Overdue', briefing.overdue, 'overdue'],
@@ -1532,14 +1634,14 @@ function renderPanel() {
     }
     return `
       <h2>Executive Inbox</h2>
-      <p>Process high-value clarification questions before they change durable memory.</p>
+      <p>Process high-value clarification questions and advisor reviews before they change durable memory.</p>
       ${executiveInboxMessage ? `<p class="success" role="status">${escapeHtml(executiveInboxMessage)}</p>` : ''}
       <div class="toolbar">
         <button id="inbox-refresh" type="button" class="secondary" ${submitting || executiveInboxLoading ? 'disabled' : ''}>Refresh</button>
       </div>
       ${executiveInboxLoading || !executiveInbox ? '<p>Loading inbox…</p>' : `
         <div class="inbox-list">
-          ${executiveInbox.items?.length ? executiveInbox.items.map(renderInboxItem).join('') : '<p class="muted">No clarification questions need attention right now.</p>'}
+          ${executiveInbox.items?.length ? executiveInbox.items.map(renderInboxItem).join('') : '<p class="muted">No clarification questions or advisor reviews need attention right now.</p>'}
         </div>
       `}
     `;

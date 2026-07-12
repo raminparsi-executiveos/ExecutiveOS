@@ -23,6 +23,7 @@ from .models import (
     Decision,
     EntityAlias,
     IntegrationInboxItem,
+    LeadershipReview,
     Meeting,
     Metric,
     Person,
@@ -47,6 +48,8 @@ from .schemas import (
     EntityAliasRequest,
     IntegrationInboxCreateRequest,
     IntegrationInboxDecisionRequest,
+    LeadershipReviewGenerateRequest,
+    LeadershipReviewProposalRequest,
     LoginRequest,
     MeetingPrepRequest,
     ReviewAlertResolutionRequest,
@@ -114,6 +117,17 @@ from .memory import (
     RESULT_TYPES,
 )
 from .observability_service import capture_observability
+from .leadership_service import (
+    apply_review_proposals,
+    dismiss_leadership_review,
+    generate_capture_leadership_review,
+    generate_manual_leadership_review,
+    generate_nightly_leadership_review,
+    leadership_inbox_items,
+    list_leadership_reviews,
+    review_leadership_review,
+    serialize_leadership_review,
+)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -231,10 +245,23 @@ def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(g
     except SQLAlchemyError as error:
         db.rollback()
         raise HTTPException(status_code=500, detail="Capture could not be saved") from error
+    leadership_review = None
+    leadership_error = ""
+    capture_record = db.query(CaptureRecord).order_by(CaptureRecord.id.desc()).first()
+    if capture_record:
+        try:
+            leadership_review = generate_capture_leadership_review(db, capture_record)
+            db.commit()
+            db.refresh(leadership_review)
+        except Exception as error:
+            db.rollback()
+            leadership_error = f"Leadership review could not be generated: {type(error).__name__}"
     return {
         "message": "Approved updates saved",
         "saved_count": len(payload.approved_updates),
         "approved_updates": [update.model_dump() for update in payload.approved_updates],
+        "leadership_review": serialize_leadership_review(leadership_review) if leadership_review else None,
+        "leadership_review_error": leadership_error,
     }
 
 
@@ -574,11 +601,18 @@ def get_executive_inbox(
     db: Session = Depends(get_db),
     _user: str = Depends(require_auth),
 ):
-    items = executive_inbox_items(db, refresh=refresh, status=status, company=company)
+    clarification_status = status
+    review_status = "new" if status == "open" else status
+    items = []
+    if source_type in {"", "clarification"}:
+        items.extend(executive_inbox_items(db, refresh=refresh, status=clarification_status, company=company))
+    if source_type in {"", "leadership_review"}:
+        items.extend(leadership_inbox_items(db, status=review_status, company=company))
     if refresh:
         db.commit()
     if source_type:
         items = [item for item in items if item["source_type"] == source_type]
+    items = sorted(items, key=lambda item: item.get("score", 0), reverse=True)
     return {"items": items, "total": len(items)}
 
 
@@ -591,6 +625,117 @@ def generate_clarification_queue(db: Session = Depends(get_db), _user: str = Dep
         db.rollback()
         raise HTTPException(status_code=400, detail="Clarifications could not be generated") from error
     return {"items": [serialize_clarification(item) for item in generated], "total": len(generated)}
+
+
+@app.get("/leadership-reviews")
+def get_leadership_reviews(
+    review_type: str = Query(default="", max_length=20),
+    status: str = Query(default="", max_length=50),
+    company: str = Query(default="", max_length=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    reviews = list_leadership_reviews(db, review_type=review_type, status=status, company=company, limit=limit)
+    return {"items": [serialize_leadership_review(review) for review in reviews], "total": len(reviews)}
+
+
+@app.get("/leadership-reviews/{review_id}")
+def get_leadership_review(review_id: int, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
+    review = db.get(LeadershipReview, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Leadership review not found")
+    return {"review": serialize_leadership_review(review)}
+
+
+@app.post("/leadership-reviews/generate")
+def generate_leadership_review(
+    payload: LeadershipReviewGenerateRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    try:
+        if payload.review_type == "nightly":
+            review = generate_nightly_leadership_review(db, company=payload.company, force=payload.force)
+        elif payload.review_type == "manual":
+            review = generate_manual_leadership_review(db, company=payload.company)
+        else:
+            raise HTTPException(status_code=422, detail="Unsupported leadership review type")
+        db.commit()
+        db.refresh(review)
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Leadership review could not be generated") from error
+    return {"message": "Leadership review generated", "review": serialize_leadership_review(review)}
+
+
+@app.post("/leadership-reviews/nightly/run")
+def run_nightly_leadership_review(
+    payload: LeadershipReviewGenerateRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    try:
+        review = generate_nightly_leadership_review(db, company=payload.company, force=payload.force)
+        db.commit()
+        db.refresh(review)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Nightly leadership review could not be generated") from error
+    return {"message": "Nightly leadership review generated", "review": serialize_leadership_review(review)}
+
+
+@app.post("/leadership-reviews/{review_id}/review")
+def mark_leadership_review_reviewed(
+    review_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    review = db.get(LeadershipReview, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Leadership review not found")
+    review_leadership_review(db, review)
+    db.commit()
+    db.refresh(review)
+    return {"message": "Leadership review marked reviewed", "review": serialize_leadership_review(review)}
+
+
+@app.post("/leadership-reviews/{review_id}/dismiss")
+def dismiss_leadership_review_endpoint(
+    review_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    review = db.get(LeadershipReview, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Leadership review not found")
+    dismiss_leadership_review(db, review)
+    db.commit()
+    db.refresh(review)
+    return {"message": "Leadership review dismissed", "review": serialize_leadership_review(review)}
+
+
+@app.post("/leadership-reviews/{review_id}/proposals")
+def apply_leadership_review_proposals(
+    review_id: int,
+    payload: LeadershipReviewProposalRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    review = db.get(LeadershipReview, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Leadership review not found")
+    try:
+        applied = apply_review_proposals(db, review, payload.finding_indexes)
+        db.commit()
+        db.refresh(review)
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Leadership review proposals could not be applied") from error
+    return {"message": "Leadership review proposals applied", "applied": applied, "review": serialize_leadership_review(review)}
 
 
 @app.get("/clarifications")

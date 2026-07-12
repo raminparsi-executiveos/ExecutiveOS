@@ -242,6 +242,29 @@ class ReviewAlert(TimestampMixin, Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
 
+class LeadershipReview(TimestampMixin, Base):
+    __tablename__ = "leadership_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    review_type = Column(String, default="manual", index=True)
+    company = Column(String, default="", index=True)
+    capture_id = Column(Integer, nullable=True, index=True)
+    generated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    period_start = Column(DateTime(timezone=True), nullable=True, index=True)
+    period_end = Column(DateTime(timezone=True), nullable=True, index=True)
+    executive_summary = Column(Text, default="")
+    findings = Column(JSON, default=list)
+    strategic_questions = Column(JSON, default=list)
+    proposed_followups = Column(JSON, default=list)
+    missing_context = Column(JSON, default=list)
+    confidence = Column(String, default="0.0")
+    model = Column(String, default="deterministic")
+    prompt_version = Column(String, default="leadership-advisor-v1", index=True)
+    status = Column(String, default="new", index=True)
+    idempotency_key = Column(String, unique=True, index=True, nullable=False)
+    source_record_ids = Column(JSON, default=list)
+
+
 class IntegrationInboxItem(TimestampMixin, Base):
     __tablename__ = "integration_inbox_items"
 

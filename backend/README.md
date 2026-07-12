@@ -37,6 +37,7 @@ alembic upgrade head
 | `OPENAI_MODEL` | Capture model. Defaults to `gpt-5.6`. |
 | `OPENAI_IMAGE_DETAIL` | Screenshot image detail. Defaults to `high`; set `low` for faster rough reads. |
 | `OPENAI_TIMEOUT_SECONDS` | OpenAI request timeout. Defaults to `60`; Render defaults to `90` for screenshot analysis. |
+| `LEADERSHIP_REVIEW_TIMEZONE` | Local timezone for idempotent nightly Leadership Advisor reviews. Defaults to `America/Los_Angeles`. |
 | `CORS_ORIGINS` | Comma-separated browser origins. Defaults to `*`. |
 | `EXECUTIVEOS_USERNAME` | Login username. Defaults to `admin`. |
 | `EXECUTIVEOS_PASSWORD` | Enables auth locally and is required on Render. Minimum 12 characters. |
@@ -68,7 +69,14 @@ Authentication is required when `EXECUTIVEOS_PASSWORD` is set or when Render set
 | `GET` | `/integration-inbox` | Lists staged calendar/document inbox items. |
 | `POST` | `/integration-inbox` | Creates an inbox item from Google Calendar event data or uploaded-document text. |
 | `POST` | `/integration-inbox/{item_id}/approve` | Saves reviewed inbox suggestions through the approval workflow. |
-| `GET` | `/executive-inbox` | Lists normalized executive inbox items, including clarification cards. |
+| `GET` | `/executive-inbox` | Lists normalized executive inbox items, including clarification cards and Leadership Advisor reviews. |
+| `GET` | `/leadership-reviews` | Lists durable Leadership Advisor reviews by type, status, company, and limit. |
+| `GET` | `/leadership-reviews/{review_id}` | Retrieves one Leadership Advisor review. |
+| `POST` | `/leadership-reviews/generate` | Generates a manual or idempotent nightly Leadership Advisor review. |
+| `POST` | `/leadership-reviews/nightly/run` | Runs the protected nightly Leadership Advisor job endpoint. |
+| `POST` | `/leadership-reviews/{review_id}/review` | Marks a Leadership Advisor review reviewed. |
+| `POST` | `/leadership-reviews/{review_id}/dismiss` | Dismisses a Leadership Advisor review. |
+| `POST` | `/leadership-reviews/{review_id}/proposals` | Applies explicitly approved follow-up proposals from a Leadership Advisor review. |
 | `POST` | `/clarifications/generate` | Runs deterministic clarification rules and deduplicates resulting cards. |
 | `GET` | `/clarifications` | Lists clarification cards with status, company, type, target, and score filters. |
 | `GET` | `/clarifications/{clarification_id}` | Retrieves one clarification with evidence and proposed update state. |
@@ -99,6 +107,8 @@ Tasks use statuses `open`, `in_progress`, `waiting`, `blocked`, `completed`, and
 The briefing endpoint ranks tasks, decisions, risks, meetings, captures, and active memory into Needs Your Attention, Delegate or Follow Up, Overdue, Blocked or Waiting, Changed Since Last Briefing, and Upcoming. Each ranked item includes score reasons, owner, company, status, due date, recommended next action, and compact source information.
 
 Clarifications are deterministic, durable questions about material missing context, stale records, contradictions, ambiguous action language, and disconnected decisions. They appear in `/executive-inbox`, the `clarifications_needed` briefing section, and relevant meeting prep questions. Answering a clarification creates a preview; confirming it is the separate operation that updates stable target records and creates revision history.
+
+Leadership Advisor reviews are durable, evidence-linked reviews generated after approved captures, manually, or nightly. Capture review generation is best-effort and does not block the capture save. Nightly reviews are idempotent by local day using `LEADERSHIP_REVIEW_TIMEZONE`. Proposed follow-ups are staged until the user applies them through `/leadership-reviews/{review_id}/proposals`.
 
 Capture-approved records, manual object edits, and inbox approvals create provenance/revision records. Search supports company, record type, date, status, owner, priority, and conversation filters and returns directly supported facts, inferences, missing information, and supporting records.
 

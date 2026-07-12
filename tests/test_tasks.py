@@ -19,7 +19,7 @@ def test_tasks_can_be_created_completed_reopened_and_deleted():
         'description': 'Send revised client-retention plan.',
         'company': 'PEC',
         'owner': 'Kyle',
-        'due_date': '2026-07-11',
+        'due_date': '2026-07-20',
         'status': 'open',
         'priority': 'high',
         'source_type': 'manual',
