@@ -1188,11 +1188,43 @@ def capture_audit_package(
                 "id": mutation.saved_record_id or mutation.matched_record_id,
             },
         })
+    if not comparison_rows:
+        approved_suggestions = capture_record.approved_suggestions or []
+        saved_record_ids = capture_record.saved_record_ids or []
+        for index, suggestion in enumerate(approved_suggestions):
+            linked = next(
+                (
+                    item for item in saved_record_ids
+                    if item.get("suggestion_index") == index or (
+                        not item.get("suggestion_index") and item.get("type") == suggestion.get("type")
+                    )
+                ),
+                {},
+            )
+            comparison_rows.append({
+                "original_input": capture_record.raw_text,
+                "ai_interpretation": suggestion.get("explanation") or suggestion.get("details") or suggestion.get("source_excerpt") or "",
+                "approved_mutation": suggestion,
+                "actual_saved_value": {},
+                "omitted_or_unresolved_context": {
+                    "missing_material_fields": suggestion.get("missing_material_fields") or [],
+                    "uncertainty": suggestion.get("uncertainty") or "",
+                    "status": "approved_legacy",
+                },
+                "linked_record": {
+                    "type": linked.get("type") or suggestion.get("type") or "",
+                    "id": linked.get("id"),
+                },
+            })
     return {
         "capture": _serialize_model(capture_record),
         "interpretation": _serialize_model(interpretation) if interpretation else None,
         "mutations": [_serialize_model(mutation) for mutation in mutations],
         "comparison": comparison_rows,
+        "available_actions": [
+            {"key": "review_again", "label": "Review again in Capture"},
+            {"key": "create_tasks", "label": "Create tasks from capture"},
+        ],
     }
 
 

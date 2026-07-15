@@ -707,6 +707,25 @@ async function openAuditLinkedRecord(recordType, recordId, mode = 'view') {
   if (mode === 'edit' || mode === 'related') scrollMemoryDetailIntoView();
 }
 
+function reopenAuditCaptureForReview(mode = 'review') {
+  const rawText = captureAuditDetail?.capture?.raw_text || '';
+  if (!rawText.trim()) {
+    setApiError('This audit does not include capture text to review again.');
+    return;
+  }
+  captureText = mode === 'tasks'
+    ? `Create qualified tasks and follow-ups from this capture:\n\n${rawText}`
+    : rawText;
+  screenshots = [];
+  classificationResult = null;
+  selectedUpdateIndices = [];
+  captureResult = null;
+  capturePhase = '';
+  active = 'capture';
+  apiError = null;
+  render();
+}
+
 async function loadExecutiveInbox() {
   executiveInboxLoading = true;
   executiveInboxMessage = '';
@@ -1212,6 +1231,12 @@ function render() {
           button.getAttribute('data-audit-memory-action'),
         );
       });
+    });
+    app.querySelector('[data-audit-review-again]')?.addEventListener('click', () => {
+      reopenAuditCaptureForReview('review');
+    });
+    app.querySelector('[data-audit-create-tasks]')?.addEventListener('click', () => {
+      reopenAuditCaptureForReview('tasks');
     });
   }
 
@@ -1723,6 +1748,10 @@ function renderPanel() {
             <h3>Capture #${escapeHtml(detail.capture?.id || '')}</h3>
             <span class="badge">${escapeHtml(detail.capture?.classification_source || 'unknown')}</span>
           </div>
+          <div class="button-row audit-top-actions">
+            <button type="button" class="secondary" data-audit-review-again>Review again in Capture</button>
+            <button type="button" class="secondary" data-audit-create-tasks>Create tasks from capture</button>
+          </div>
           <p><strong>Original input</strong></p>
           <p>${escapeHtml(detail.capture?.raw_text || '')}</p>
           ${detail.interpretation ? `
@@ -1759,7 +1788,11 @@ function renderPanel() {
                   ` : '<small class="muted">No saved record</small>'}
                 </span>
               </div>
-            `).join('') || '<p class="muted">No mutation rows were recorded for this capture.</p>'}
+            `).join('') || `
+              <div class="empty-notice" role="status">
+                No approved mutation rows were recorded for this capture. Use the actions above to review it again or extract tasks from the original input.
+              </div>
+            `}
           </div>
         </div>
       ` : ''}

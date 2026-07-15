@@ -122,6 +122,40 @@ def test_capture_audit_endpoint_compares_original_approved_and_persisted_values(
     assert row["linked_record"]["type"] == "task"
 
 
+def test_capture_audit_synthesizes_rows_for_legacy_capture_without_mutations():
+    db = SessionLocal()
+    try:
+        task = Task(title="Review Grace PIP document", company="RYSE Wellness", owner="Ramin")
+        db.add(task)
+        db.flush()
+        task_id = task.id
+        capture = CaptureRecord(
+            raw_text="Review pip document for Grace and give Veronica feedback.",
+            classification_source="local_fallback",
+            saved_count=1,
+            approved_suggestions=[{
+                "type": "task",
+                "title": "Review Grace PIP document",
+                "details": "Review PIP document and provide feedback.",
+            }],
+            saved_record_ids=[{"type": "task", "id": task_id, "suggestion_index": 0}],
+        )
+        db.add(capture)
+        db.commit()
+        capture_id = capture.id
+    finally:
+        db.close()
+
+    audit = client.get(f"/captures/{capture_id}/audit")
+
+    assert audit.status_code == 200
+    payload = audit.json()
+    assert payload["comparison"]
+    assert payload["comparison"][0]["linked_record"] == {"type": "task", "id": task_id}
+    assert payload["comparison"][0]["omitted_or_unresolved_context"]["status"] == "approved_legacy"
+    assert {action["key"] for action in payload["available_actions"]} >= {"review_again", "create_tasks"}
+
+
 def test_capture_fidelity_records_are_included_in_backup():
     saved = client.post("/capture/confirm", json={
         "text": "Mina will prepare the weekly margin review.",

@@ -707,6 +707,10 @@ select {
   padding: 7px 9px;
 }
 
+.audit-top-actions {
+  margin: 10px 0 18px;
+}
+
 @media (max-width: 900px) {
   .audit-row {
     grid-template-columns: 1fr;
