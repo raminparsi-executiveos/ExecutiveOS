@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from .leadership_lens import enrich_task_update_with_leadership_lens
 from .models import Meeting, Task
 
 
@@ -175,6 +176,7 @@ def upsert_task_from_update(
     title = normalize_task_title(update.get("title") or update.get("details") or "")
     if not title:
         return None
+    update = enrich_task_update_with_leadership_lens({**update, "type": "task", "title": title})
     update = normalize_task_attributes(update, fallback_unknown=True)
     status = update.get("status") or "open"
     priority = update.get("priority") or "medium"

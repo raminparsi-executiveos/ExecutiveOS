@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .leadership_lens import leadership_lens_summary
+
 logger = logging.getLogger(__name__)
 CAPTURE_PROMPT_VERSION = "capture-fidelity-v1"
 
@@ -171,6 +173,13 @@ Populate expected_deliverable, definition_of_done, next_action, dependencies,
 follow_up_date, recurrence or task_type, why_it_matters, source_excerpt, confidence,
 and missing_material_fields when supported. Do not use the whole capture as task
 description unless the entire capture concerns only that task.
+Enrich task proposals from a leader perspective using these management lenses:
+The Effective Executive, High Output Management, Good to Great,
+The Five Dysfunctions of a Team, and Measure What Matters. Use them to clarify
+executive contribution, output cadence, focused priorities, team accountability,
+and measurable results. Put this framing in why_it_matters, definition_of_done,
+expected_deliverable, next_action, missing_material_fields, and interpretation_notes.
+Do not claim the capture mentioned a book unless it did.
 Classify each suggestion as one of confirmed_fact, decision, commitment, proposal,
 concern, assumption, recommendation, or unverified_information. Set verification_state
 to ai_extracted_pending_review unless the capture explicitly says the user confirmed it.
@@ -209,7 +218,7 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         response = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2).responses.parse(
             model=model,
             input=[
-                {"role": "system", "content": f"{SYSTEM_PROMPT}\nPrompt version: {CAPTURE_PROMPT_VERSION}"},
+                {"role": "system", "content": f"{SYSTEM_PROMPT}\n{leadership_lens_summary()}\nPrompt version: {CAPTURE_PROMPT_VERSION}"},
                 {
                     "role": "user",
                     "content": user_content,

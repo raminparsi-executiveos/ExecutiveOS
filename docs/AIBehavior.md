@@ -19,6 +19,7 @@ The system should:
 - Corrections are authoritative. When a capture says "X, not Y", the system must not assign Y.
 - Employment transitions should preserve former company, new primary company, timing, and ongoing advisory or part-time relationships when stated.
 - Commitments and action items should be proposed as task updates with owner, due date, priority, blocker, and source fields when supported by the capture.
+- Task suggestions are enriched with a leadership lens inspired by five canonical management books: `The Effective Executive`, `High Output Management`, `Good to Great`, `The Five Dysfunctions of a Team`, and `Measure What Matters`. This lens should improve expected deliverables, definitions of done, accountability gaps, review cadence, and measurable outcomes without treating book concepts as facts from the capture.
 - Fuzzy matches against open tasks or legacy meeting action text may create review suggestions, but must not silently delete or complete memory.
 - `details` may provide readable context, but durable typed fields should be populated whenever possible.
 - Briefing, meeting-prep, and search outputs are generated views over memory, not source-of-truth records.

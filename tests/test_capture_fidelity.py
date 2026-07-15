@@ -267,3 +267,69 @@ def test_local_fallback_does_not_invent_mina_from_minimum_or_passive_feedback(mo
     assert "Review pip document for Grace and give veronica feedback" in task_titles
     assert any(title.lower().startswith("get timeline from joe") for title in task_titles)
     assert any("facility improvement and maintenance" in title.lower() for title in task_titles)
+
+
+def test_local_fallback_preserves_sales_meeting_task_context(monkeypatch):
+    monkeypatch.setattr("app.capture_service.analyze_capture", lambda text, memory_context: None)
+    capture = (
+        "Pec sales meeting prep for tomorrow. "
+        "Federico to transition to full quote creation on ownership, full site visit coordination ownership, and follow up program ownership by July 21. "
+        "Catalina and Ryan to own the task of getting him there. "
+        "Outreach must be logged in gohighlevel and also in activity spreadsheet. "
+        "Populate every day so that we can review prior to each sales check in. "
+        "We need to be more competitive on pricing. Especially on large jobs. "
+        "We need to start landing those jobs to get our year back on track. "
+        "Structural engineering is able to take on new projects. "
+        "We will leverage Yeison until we are able to train or hire his replacement. "
+        "The outreach and re-connection with old clients is what will get us to our numbers. "
+        "Offer discounts on proposals. "
+        "Let’s try to close as many quotes this week as possible."
+    )
+
+    classified = client.post("/capture/classify", json={"text": capture})
+
+    assert classified.status_code == 200
+    tasks = [update for update in classified.json()["suggested_updates"] if update["type"] == "task"]
+    titles = [task["title"] for task in tasks]
+    assert "Review prior to each sales check in" not in titles
+    outreach = next(task for task in tasks if task["title"] == "Log outreach daily in GoHighLevel and activity spreadsheet")
+    assert outreach["recurrence"] == "daily"
+    assert outreach["task_type"] == "standing_responsibility"
+    assert "leadership-lens" in outreach["tags"]
+    assert "The Effective Executive" in outreach["interpretation_notes"]
+    assert "High Output Management" in outreach["interpretation_notes"]
+    assert "review before each sales check-in" in outreach["definition_of_done"]
+    assert "old clients" in outreach["why_it_matters"]
+    transition = next(task for task in tasks if task["title"].startswith("Transition Federico"))
+    assert transition["assigned_to"] == "Federico"
+    assert transition["due_date"] == "July 21"
+    assert "quote creation" in transition["expected_deliverable"]
+    enablement = next(task for task in tasks if task["title"].startswith("Catalina and Ryan get Federico ready"))
+    assert enablement["owner"] == "Catalina and Ryan"
+    assert "Federico" in enablement["stakeholders"]
+    assert any(task["title"] == "Offer discounts on proposals for competitive pricing" for task in tasks)
+    assert any(task["title"] == "Close as many quotes as possible this week" for task in tasks)
+
+
+def test_leadership_lens_enriches_ai_task_suggestions_and_saved_tasks():
+    saved = client.post("/capture/confirm", json={
+        "text": "Avery should tighten the PEC quote follow-up process.",
+        "classification_source": "ai",
+        "approved_updates": [{
+            "type": "task",
+            "title": "Tighten PEC quote follow-up process",
+            "company": "PEC",
+            "owner": "Avery",
+            "status": "open",
+            "priority": "high",
+            "source_type": "capture_text",
+        }],
+    })
+
+    assert saved.status_code == 200
+    tasks = client.get("/objects/tasks").json()["items"]
+    task = next(item for item in tasks if item["title"] == "Tighten PEC quote follow-up process")
+    assert "leadership-lens" in task["tags"]
+    assert "measurable result" in task["interpretation_notes"]
+    assert task["expected_deliverable"].startswith("Observable outcome")
+    assert "accountable owner confirms" in task["definition_of_done"]

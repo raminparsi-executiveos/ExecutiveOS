@@ -12,6 +12,7 @@ from .memory import (
     _match_score,
     _normalize_company,
 )
+from .leadership_lens import enrich_task_update_with_leadership_lens, enrich_updates_with_leadership_lens
 from .models import (
     CaptureInterpretation,
     CaptureMutation,
@@ -298,6 +299,13 @@ def _task_update(
     due_date: str = "",
     source_excerpt: str = "",
     missing_material_fields: list[str] | None = None,
+    expected_deliverable: str = "",
+    definition_of_done: str = "",
+    why_it_matters: str = "",
+    recurrence: str = "",
+    task_type: str = "",
+    stakeholders: list[str] | None = None,
+    dependencies: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "type": "task",
@@ -313,10 +321,15 @@ def _task_update(
         "source_type": "capture_text",
         "source_summary": text.strip()[:500],
         "next_action": next_action or title,
-        "expected_deliverable": title,
-        "definition_of_done": f"{title} is completed and the outcome is captured.",
+        "expected_deliverable": expected_deliverable or title,
+        "definition_of_done": definition_of_done or f"{title} is completed and the outcome is captured.",
+        "why_it_matters": why_it_matters,
         "source_excerpt": source_excerpt or title,
         "missing_material_fields": missing_material_fields or [],
+        "recurrence": recurrence,
+        "task_type": task_type,
+        "stakeholders": stakeholders or [],
+        "dependencies": dependencies or [],
         "details": "Potential action item or commitment.",
         "memory_classification": "commitment",
         "verification_state": "ai_extracted_pending_review",
@@ -336,10 +349,113 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
         updates.append(update)
 
     sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
+    transition_subject = ""
     for sentence in sentences:
         passive_match = re.search(r"\bwill\s+be\s+(?:provided|selected|used|discussed|reviewed|captured)\b", sentence, flags=re.IGNORECASE)
         if passive_match:
             continue
+
+        transition_match = re.search(
+            r"\b([A-Z][A-Za-z]+)\s+to\s+transition\s+to\s+(.+?)\s+by\s+([A-Z][a-z]+\s+\d{1,2})\b",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+        if transition_match:
+            person, scope, due_date = transition_match.groups()
+            transition_subject = person
+            title = _title_from_action(f"Transition {person} to {scope}")
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                assigned_to=person,
+                due_date=due_date,
+                source_excerpt=sentence,
+                expected_deliverable=f"{person} owns {scope}.",
+                definition_of_done=f"{person} is operating independently on {scope} by {due_date}.",
+                why_it_matters="Sales execution ownership needs to be clear before the meeting follow-up date.",
+                missing_material_fields=["accountable owner"],
+                stakeholders=[person],
+            ))
+
+        enabler_match = re.search(
+            r"\b([A-Z][A-Za-z]+(?:\s+and\s+[A-Z][A-Za-z]+)?)\s+to\s+own\s+the\s+task\s+of\s+getting\s+([A-Z][A-Za-z]+|him|her|them)\s+there\b",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+        if enabler_match:
+            owners_text, target_person = enabler_match.groups()
+            if target_person.lower() in {"him", "her", "them"} and transition_subject:
+                target_person = transition_subject
+            owners = [name.strip() for name in re.split(r"\s+and\s+", owners_text) if name.strip()]
+            title = _title_from_action(f"{owners_text} get {target_person} ready for quote and follow-up ownership")
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                owner=owners_text,
+                assigned_to=owners_text,
+                source_excerpt=sentence,
+                expected_deliverable=f"{target_person} is ready to own quote creation, site-visit coordination, and follow-up workflow.",
+                definition_of_done=f"{', '.join(owners)} confirm {target_person} can execute the sales ownership workflow without hand-holding.",
+                why_it_matters="The sales handoff depends on clear enablement ownership.",
+                stakeholders=[target_person, *owners],
+            ))
+
+        outreach_match = re.search(
+            r"\bOutreach\s+must\s+be\s+logged\s+in\s+(.+?)(?:[.!?]|$)",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+        if outreach_match:
+            systems = outreach_match.group(1).strip()
+            follow_sentence = next((candidate for candidate in sentences if re.search(r"\bPopulate\s+every\s+day\b", candidate, re.IGNORECASE)), "")
+            excerpt = f"{sentence} {follow_sentence}".strip()
+            title = "Log outreach daily in GoHighLevel and activity spreadsheet"
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                source_excerpt=excerpt,
+                next_action=title,
+                expected_deliverable=f"Daily outreach entries are logged in {systems}.",
+                definition_of_done="Outreach is populated every day and ready for review before each sales check-in.",
+                why_it_matters="Outreach and reconnection with old clients are expected to drive sales numbers.",
+                recurrence="daily",
+                task_type="standing_responsibility",
+                missing_material_fields=["owner"],
+            ))
+
+        discount_match = re.search(r"\bOffer\s+discounts\s+on\s+proposals\b", sentence, flags=re.IGNORECASE)
+        if discount_match:
+            title = "Offer discounts on proposals for competitive pricing"
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                source_excerpt=sentence,
+                next_action="Decide discount guidance for active proposals.",
+                expected_deliverable="Discount guidance is applied to proposals where pricing competitiveness matters.",
+                definition_of_done="Large-job proposals reflect approved discount strategy and are ready for follow-up.",
+                why_it_matters="PEC needs to be more competitive on pricing, especially on large jobs.",
+                missing_material_fields=["owner", "discount criteria"],
+            ))
+
+        close_quotes_match = re.search(r"\bclose\s+as\s+many\s+quotes\s+this\s+week\s+as\s+possible\b", sentence, flags=re.IGNORECASE)
+        if close_quotes_match:
+            title = "Close as many quotes as possible this week"
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                source_excerpt=sentence,
+                due_date="this week",
+                next_action="Prioritize active quotes for close attempts this week.",
+                expected_deliverable="Maximum feasible quotes closed this week.",
+                definition_of_done="Active quote follow-ups are completed and closed-won/lost outcomes are logged.",
+                why_it_matters="Closing quotes this week supports getting the year back on track.",
+                missing_material_fields=["owner", "target quote list"],
+            ))
 
         will_match = re.search(
             r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+will\s+(.+?)(?:[.!?]|$)",
@@ -347,6 +463,8 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
         )
         if will_match:
             owner, action = (value.strip() if value else "" for value in will_match.groups())
+            if owner.lower() in {"we", "i"}:
+                continue
             due_date = ""
             due_match = re.search(r"\s+by\s+(.+)$", action, flags=re.IGNORECASE)
             if due_match:
@@ -373,6 +491,10 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
         for pattern, template in directive_patterns:
             match = re.search(pattern, sentence, flags=re.IGNORECASE)
             if not match:
+                continue
+            if template.startswith("Review") and re.search(r"\bso\s+that\s+we\s+can\s+review\b", sentence, flags=re.IGNORECASE):
+                continue
+            if template.startswith("Get") and match.start() > 0 and sentence[max(0, match.start() - 4):match.start()].lower().strip().endswith("to"):
                 continue
             action = match.group(1).strip()
             title = _title_from_action(template.format(action=action))
@@ -713,7 +835,7 @@ def _classify_capture_text(
     analysis = analyze_capture(text, _memory_context(db), image_inputs) if image_inputs else analyze_capture(text, _memory_context(db))
     if analysis:
         return (
-            resolution_updates + [update.model_dump() for update in analysis.suggested_updates],
+            enrich_updates_with_leadership_lens(resolution_updates + [update.model_dump() for update in analysis.suggested_updates]),
             analysis.follow_ups,
             "ai",
             analysis,
@@ -726,7 +848,7 @@ def _classify_capture_text(
             follow_ups.append(
                 "What person, company, project, decision, or metric should be saved from this update?"
             )
-        return updates, follow_ups, "local_fallback", None
+        return enrich_updates_with_leadership_lens(updates), follow_ups, "local_fallback", None
     if image_inputs:
         return [], [_screenshot_unavailable_message()], "image_unavailable", None
     updates = resolution_updates + _fallback_classify_capture_text(text)
@@ -735,7 +857,7 @@ def _classify_capture_text(
         follow_ups.extend([
         "What person, company, project, decision, or metric should be saved from this update?"
         ])
-    return updates, follow_ups, "local_fallback", None
+    return enrich_updates_with_leadership_lens(updates), follow_ups, "local_fallback", None
 
 
 def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
@@ -889,6 +1011,7 @@ def _apply_approved_updates(
     persisted_by_index: dict[int, dict[str, Any]] = {}
     for update_index, raw_update in enumerate(approved_updates):
         update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
+        update = enrich_task_update_with_leadership_lens(update)
         approved_payloads.append(update)
         update_type = update.get("type")
         saved_instance = None
