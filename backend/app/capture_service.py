@@ -272,14 +272,145 @@ def _upsert_decision(db: Session, title: str, company: str, context: str, final_
     return decision
 
 
+def _detect_known_person_name(text: str) -> str:
+    for candidate in ["Julio", "Mina"]:
+        if re.search(rf"\b{re.escape(candidate)}\b", text, flags=re.IGNORECASE):
+            return candidate
+    return ""
+
+
+def _title_from_action(action: str) -> str:
+    cleaned = " ".join(str(action or "").strip(" :-").split())
+    if not cleaned:
+        return ""
+    return cleaned[0].upper() + cleaned[1:]
+
+
+def _task_update(
+    title: str,
+    text: str,
+    company: str,
+    *,
+    owner: str = "",
+    assigned_to: str = "",
+    waiting_on: str = "",
+    next_action: str = "",
+    due_date: str = "",
+    source_excerpt: str = "",
+    missing_material_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "task",
+        "title": title,
+        "description": source_excerpt or title,
+        "company": company,
+        "owner": owner,
+        "assigned_to": assigned_to,
+        "waiting_on": waiting_on,
+        "due_date": due_date,
+        "status": "open",
+        "priority": "medium",
+        "source_type": "capture_text",
+        "source_summary": text.strip()[:500],
+        "next_action": next_action or title,
+        "expected_deliverable": title,
+        "definition_of_done": f"{title} is completed and the outcome is captured.",
+        "source_excerpt": source_excerpt or title,
+        "missing_material_fields": missing_material_fields or [],
+        "details": "Potential action item or commitment.",
+        "memory_classification": "commitment",
+        "verification_state": "ai_extracted_pending_review",
+    }
+
+
+def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, Any]]:
+    updates: list[dict[str, Any]] = []
+    seen_titles: set[str] = set()
+
+    def add(update: dict[str, Any]) -> None:
+        title = update.get("title", "")
+        normalized = re.sub(r"\s+", " ", title.lower()).strip()
+        if not normalized or normalized in seen_titles:
+            return
+        seen_titles.add(normalized)
+        updates.append(update)
+
+    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
+    for sentence in sentences:
+        passive_match = re.search(r"\bwill\s+be\s+(?:provided|selected|used|discussed|reviewed|captured)\b", sentence, flags=re.IGNORECASE)
+        if passive_match:
+            continue
+
+        will_match = re.search(
+            r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+will\s+(.+?)(?:[.!?]|$)",
+            sentence,
+        )
+        if will_match:
+            owner, action = (value.strip() if value else "" for value in will_match.groups())
+            due_date = ""
+            due_match = re.search(r"\s+by\s+(.+)$", action, flags=re.IGNORECASE)
+            if due_match:
+                due_date = due_match.group(1).strip()
+                action = action[:due_match.start()].strip()
+            title = _title_from_action(f"{owner} will {action}{f' by {due_date}' if due_date else ''}")
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                owner=owner,
+                assigned_to=owner,
+                due_date=due_date,
+                source_excerpt=sentence,
+            ))
+
+        directive_patterns = [
+            (r"\bReview\s+(.+?)(?:[.!?]|$)", "Review {action}"),
+            (r"\bGet\s+(.+?)(?:[.!?]|$)", "Get {action}"),
+            (r"\bGo over\s+(.+?)(?:[.!?]|$)", "Go over {action}"),
+            (r"\bcome up with\s+(.+?)(?:[.!?]|$)", "Come up with {action}"),
+            (r"\bdiscuss\s+(.+?)(?:[.!?]|$)", "Discuss {action}"),
+        ]
+        for pattern, template in directive_patterns:
+            match = re.search(pattern, sentence, flags=re.IGNORECASE)
+            if not match:
+                continue
+            action = match.group(1).strip()
+            title = _title_from_action(template.format(action=action))
+            owner_match = re.search(r"\bis owned by\s+(.+?)(?:[.!?]|$)", sentence, flags=re.IGNORECASE)
+            owner = owner_match.group(1).strip() if owner_match else ""
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                owner=owner,
+                source_excerpt=sentence,
+                missing_material_fields=[] if owner else ["owner"],
+            ))
+
+        waiting_match = re.search(
+            r"\b(?:get|confirm|receive)\s+(.+?)\s+from\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+        if waiting_match:
+            deliverable, person = waiting_match.groups()
+            title = _title_from_action(f"Get {deliverable.strip()} from {person.strip()}")
+            add(_task_update(
+                title,
+                text,
+                detected_company,
+                waiting_on=person.strip(),
+                next_action=title,
+                source_excerpt=sentence,
+            ))
+
+    return updates
+
+
 def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
     lowered = text.lower()
     updates: list[dict[str, Any]] = []
-    detected_name = ""
-    for candidate in ["Julio", "Mina"]:
-        if candidate.lower() in lowered:
-            detected_name = candidate
-            break
+    detected_name = _detect_known_person_name(text)
 
     detected_company = _detect_positive_company(text)
 
@@ -343,33 +474,7 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
             "details": "Potential metric update.",
         })
 
-    task_match = re.search(
-        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+will\s+(.+?)(?:[.!?]|$)",
-        text,
-    )
-    if task_match:
-        owner, action = (value.strip() if value else "" for value in task_match.groups())
-        due_date = ""
-        due_match = re.search(r"\s+by\s+(.+)$", action, flags=re.IGNORECASE)
-        if due_match:
-            due_date = due_match.group(1).strip()
-            action = action[:due_match.start()].strip()
-        action_title = f"{owner} will {action}"
-        if due_date:
-            action_title = f"{action_title} by {due_date}"
-        updates.append({
-            "type": "task",
-            "title": action_title,
-            "description": text.strip(),
-            "company": detected_company,
-            "owner": owner,
-            "due_date": due_date,
-            "status": "open",
-            "priority": "medium",
-            "source_type": "capture_text",
-            "source_summary": text.strip()[:500],
-            "details": "Potential action item or commitment.",
-        })
+    updates.extend(_fallback_task_updates(text, detected_company))
 
     if detected_name:
         updates.append({
@@ -775,11 +880,7 @@ def _apply_approved_updates(
     capture_id: int | None = None,
 ) -> CaptureRecord:
     lowered = text.lower()
-    detected_name = ""
-    for candidate in ["Julio", "Mina"]:
-        if candidate.lower() in lowered:
-            detected_name = candidate
-            break
+    detected_name = _detect_known_person_name(text)
 
     explicit_company = _detect_positive_company(text)
 

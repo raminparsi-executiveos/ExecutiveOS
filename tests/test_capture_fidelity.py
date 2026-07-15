@@ -229,3 +229,41 @@ def test_capture_explicit_clear_can_remove_task_owner_after_review():
     tasks = client.get("/objects/tasks").json()["items"]
     task = next(item for item in tasks if item["title"] == "Reassign Meridian handoff owner")
     assert task["owner"] == ""
+
+
+def test_local_fallback_does_not_invent_mina_from_minimum_or_passive_feedback(monkeypatch):
+    monkeypatch.setattr("app.capture_service.analyze_capture", lambda text, memory_context: None)
+    capture = (
+        "Create qualified tasks and follow-ups from this capture:\n\n"
+        "RYSE wellness leadership meeting prep : Review pip document for Grace and give veronica feedback. "
+        "Get timeline from joe for implementing healthcare plan with medical staff on each shift. "
+        "Admissions capability to med pass and QEEG and TMS. "
+        "Go over plan for once per month contractor to come thru and fix or maintain the house. "
+        "Modified binary admissions guideline to include well paying policy otherwise we can get stuck with a client that is not wanted by any other facility. "
+        "Let’s see if we can get some Google reviews from Raul before discharge. "
+        "When can we expect to eliminate guiding hands (the outsourced therapy group provider)? "
+        "Amanda should be ready to take on groups prior to transition. "
+        "Should we consider an amft that can work on case management and individual therapy instead of offering Grace a shift in role? "
+        "Review Grace pip is owned by Ramin, Arghavan and Joe. "
+        "Feedback will be provided during the leadership meeting tomorrow (July 15, 2026). "
+        "Joe is the owner of the healthcare plan implantation. "
+        "Let’s come up with a list of tasks for facility improvement and maintenance. "
+        "The Facility maintenance provider will be selected by end of the week and the first set of tasks will be used to vet the contractor. "
+        "Well-paying policy means a minimum of $1k per night. "
+        "Raul is a current client so we would like to get the review from him. "
+        "Joe is Joseph Licari. "
+        "Let’s discuss what criteria and date Amanda will be ready to take over the group therapies."
+    )
+
+    classified = client.post("/capture/classify", json={"text": capture})
+
+    assert classified.status_code == 200
+    updates = classified.json()["suggested_updates"]
+    labels = [update.get("name") or update.get("title") for update in updates]
+    assert "Mina" not in labels
+    assert "Mina promotion and pay increase" not in labels
+    assert not any(update.get("owner") == "Feedback" for update in updates)
+    task_titles = [update["title"] for update in updates if update["type"] == "task"]
+    assert "Review pip document for Grace and give veronica feedback" in task_titles
+    assert any(title.lower().startswith("get timeline from joe") for title in task_titles)
+    assert any("facility improvement and maintenance" in title.lower() for title in task_titles)
