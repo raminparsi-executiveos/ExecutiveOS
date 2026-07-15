@@ -17,6 +17,8 @@ from .database import Base, engine, get_db
 from .linking_service import related_records
 from .models import (
     CaptureRecord,
+    CaptureInterpretation,
+    CaptureMutation,
     Clarification,
     Company,
     DashboardConfig,
@@ -79,6 +81,7 @@ from .capture_service import (
     _classify_capture_text,
     capture_explicitly_resolves_item,
     capture_resolves_waiting_item,
+    create_capture_review,
 )
 from .tasks import (
     OPEN_TASK_STATUSES,
@@ -219,10 +222,20 @@ def briefing(db: Session = Depends(get_db), user: str = Depends(require_auth)):
 
 @app.post("/capture")
 def capture(payload: CaptureRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
-    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text)
+    suggested_updates, follow_ups, classification_source, analysis = _classify_capture_text(db, payload.text)
+    capture_record = None
+    if not payload.confirm:
+        capture_record, _, _ = create_capture_review(
+            db,
+            payload.text,
+            suggested_updates,
+            follow_ups,
+            classification_source,
+            analysis,
+        )
     if payload.confirm:
         try:
-            _apply_approved_updates(db, payload.text, suggested_updates, classification_source)
+            capture_record = _apply_approved_updates(db, payload.text, suggested_updates, classification_source)
         except SQLAlchemyError as error:
             db.rollback()
             raise HTTPException(status_code=500, detail="Capture could not be saved") from error
@@ -232,31 +245,54 @@ def capture(payload: CaptureRequest, db: Session = Depends(get_db), _user: str =
         "follow_ups": follow_ups,
         "classification_source": classification_source,
         "confirm": payload.confirm,
+        "capture_id": capture_record.id if capture_record else None,
     }
 
 
 @app.post("/capture/classify")
 def classify_capture(payload: CaptureClassificationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
-    suggested_updates, follow_ups, classification_source = _classify_capture_text(db, payload.text, payload.image_inputs())
+    suggested_updates, follow_ups, classification_source, analysis = _classify_capture_text(db, payload.text, payload.image_inputs())
+    capture_text = payload.text.strip() or "Screenshot capture"
+    capture_record, interpretation, mutations = create_capture_review(
+        db,
+        capture_text,
+        suggested_updates,
+        follow_ups,
+        classification_source,
+        analysis,
+        processing_events=[{
+            "event": "classification_completed",
+            "image_count": len(payload.image_inputs()),
+        }],
+    )
     return {
         "message": "Classification complete",
         "suggested_updates": suggested_updates,
         "follow_ups": follow_ups,
         "classification_source": classification_source,
         "confirm": payload.confirm,
+        "capture_id": capture_record.id,
+        "interpretation_id": interpretation.id,
+        "mutation_ids": [mutation.id for mutation in mutations],
+        "capture_interpretation": interpretation.raw_response,
     }
 
 
 @app.post("/capture/confirm")
 def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(get_db), _user: str = Depends(require_auth)):
     try:
-        _apply_approved_updates(db, payload.text, payload.approved_updates, payload.classification_source)
+        capture_record = _apply_approved_updates(
+            db,
+            payload.text,
+            payload.approved_updates,
+            payload.classification_source,
+            payload.capture_id,
+        )
     except SQLAlchemyError as error:
         db.rollback()
         raise HTTPException(status_code=500, detail="Capture could not be saved") from error
     leadership_review = None
     leadership_error = ""
-    capture_record = db.query(CaptureRecord).order_by(CaptureRecord.id.desc()).first()
     if capture_record:
         try:
             leadership_review = generate_capture_leadership_review(db, capture_record)
@@ -269,6 +305,8 @@ def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(g
         "message": "Approved updates saved",
         "saved_count": len(payload.approved_updates),
         "approved_updates": [update.model_dump() for update in payload.approved_updates],
+        "capture_id": capture_record.id if capture_record else None,
+        "saved_record_ids": capture_record.saved_record_ids if capture_record else [],
         "leadership_review": serialize_leadership_review(leadership_review) if leadership_review else None,
         "leadership_review_error": leadership_error,
     }
@@ -1109,6 +1147,52 @@ def capture_history(
         "total": query.count(),
         "limit": limit,
         "offset": offset,
+    }
+
+
+@app.get("/captures/{capture_id}/audit")
+def capture_audit_package(
+    capture_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
+    capture_record = db.get(CaptureRecord, capture_id)
+    if not capture_record:
+        raise HTTPException(status_code=404, detail="Capture not found")
+    interpretation = (
+        db.query(CaptureInterpretation)
+        .filter(CaptureInterpretation.capture_id == capture_id)
+        .order_by(CaptureInterpretation.id.desc())
+        .first()
+    )
+    mutations = (
+        db.query(CaptureMutation)
+        .filter(CaptureMutation.capture_id == capture_id)
+        .order_by(CaptureMutation.suggestion_index.asc(), CaptureMutation.id.asc())
+        .all()
+    )
+    comparison_rows = []
+    for mutation in mutations:
+        comparison_rows.append({
+            "original_input": capture_record.raw_text,
+            "ai_interpretation": mutation.explanation or mutation.evidence_excerpt,
+            "approved_mutation": mutation.approved_values or {},
+            "actual_saved_value": mutation.persisted_values or {},
+            "omitted_or_unresolved_context": {
+                "missing_material_fields": mutation.missing_material_fields or [],
+                "uncertainty": mutation.uncertainty or "",
+                "status": mutation.status,
+            },
+            "linked_record": {
+                "type": mutation.saved_record_type or mutation.matched_record_type,
+                "id": mutation.saved_record_id or mutation.matched_record_id,
+            },
+        })
+    return {
+        "capture": _serialize_model(capture_record),
+        "interpretation": _serialize_model(interpretation) if interpretation else None,
+        "mutations": [_serialize_model(mutation) for mutation in mutations],
+        "comparison": comparison_rows,
     }
 
 

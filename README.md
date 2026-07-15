@@ -7,17 +7,18 @@ ExecutiveOS is an AI-first executive memory and decision platform for founders, 
 The app ships the core executive-memory workflows plus roadmap support surfaces:
 
 1. **Capture**: enter natural language or attach a PNG, JPEG, or WebP screenshot, review suggested structured updates, and save only the approved items.
-2. **Morning Briefing**: review a ranked command center with needs-attention, delegation, overdue, blocked/waiting, changed-since-last-briefing, and upcoming sections, plus supporting memory context.
-3. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures, including unresolved company context for general leadership reviews.
-4. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
-5. **Memory**: browse stored objects, edit their fields, complete or reopen tasks, or delete incorrect records.
-6. **Review Alerts**: inspect stale, overdue, contradictory, or duplicate-looking memory and resolve alerts explicitly.
-7. **Company Dashboards**: view configurable company-specific modules with data freshness.
-8. **Integration Inbox**: stage Google Calendar event data and uploaded-document text for review before approval.
-9. **Clarifications Needed**: review high-value questions about missing owners, stale assumptions, contradictions, ambiguous action language, and disconnected records before confirming any memory changes.
-10. **Leadership Advisor**: generate evidence-grounded leadership reviews after approved captures, on demand, or through a nightly run; review or approve proposed follow-ups before any durable memory change.
-11. **Durable Resolution Tracking**: resolve and reopen risks, meeting actions, and other follow-up items by stable ID so completed items stay out of briefing and meeting prep.
-12. **Memory Backup**: export durable memory to a JSON backup or import a reviewed backup in merge or replace mode.
+2. **Capture Audit**: compare original input, screenshot evidence summaries, AI interpretation, approved mutations, rejected suggestions, and actual persisted values for any capture.
+3. **Morning Briefing**: review a ranked command center with needs-attention, delegation, overdue, blocked/waiting, changed-since-last-briefing, and upcoming sections, plus supporting memory context.
+4. **Meeting Prep**: generate an agenda and context pack from stored companies, people, projects, decisions, meetings, metrics, and recent captures, including unresolved company context for general leadership reviews.
+5. **Search / Ask**: ask natural-language questions over executive memory and get a direct answer with supporting records.
+6. **Memory**: browse stored objects, edit their fields, complete or reopen tasks, or delete incorrect records.
+7. **Review Alerts**: inspect stale, overdue, contradictory, or duplicate-looking memory and resolve alerts explicitly.
+8. **Company Dashboards**: view configurable company-specific modules with data freshness.
+9. **Integration Inbox**: stage Google Calendar event data and uploaded-document text for review before approval.
+10. **Clarifications Needed**: review high-value questions about missing owners, stale assumptions, contradictions, ambiguous action language, and disconnected records before confirming any memory changes.
+11. **Leadership Advisor**: generate evidence-grounded leadership reviews after approved captures, on demand, or through a nightly run; review or approve proposed follow-ups before any durable memory change.
+12. **Durable Resolution Tracking**: resolve and reopen risks, meeting actions, and other follow-up items by stable ID so completed items stay out of briefing and meeting prep.
+13. **Memory Backup**: export durable memory to a JSON backup or import a reviewed backup in merge or replace mode.
 
 ## Tech Stack
 
@@ -90,6 +91,8 @@ Capture uses OpenAI structured output when `OPENAI_API_KEY` is configured. Sugge
 
 Without an OpenAI key, text capture still works through a visibly labeled local preview classifier. Screenshot classification requires a configured AI connection.
 
+Every classification now creates an auditable source capture and interpretation before durable memory is changed. Confirmation links approved updates to capture mutation rows, saved record IDs, and the exact persisted values. The Capture Audit tab and `GET /captures/{capture_id}/audit` endpoint expose this comparison so lost context, user edits, rejected suggestions, duplicate-looking creates, and approved-vs-saved mismatches can be reviewed later.
+
 Capture accepts:
 
 - Text up to 20,000 characters
@@ -108,6 +111,7 @@ Important endpoints:
 - `POST /capture/classify`
 - `POST /capture/confirm`
 - `GET /capture/observability`
+- `GET /captures/{capture_id}/audit`
 - `GET /backup/export`
 - `POST /backup/import`
 - `GET /captures`
@@ -152,7 +156,7 @@ Important endpoints:
 
 Supported object types are `companies`, `people`, `strategic-issues`, `projects`, `decisions`, `meetings`, `sops`, `documents`, `metrics`, and `tasks`.
 
-Task records support owners, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` and risk arrays remain on parent records for audit, while durable `resolvable_items` child records drive open/resolved visibility in briefing and meeting prep. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
+Task records support owners, assigned performers, delegators, waiting-on parties, expected deliverables, definitions of done, why-it-matters notes, dependencies, follow-up dates, recurrence, task type, source excerpts, confidence, due dates, status, priority, source metadata, blockers, next actions, tags, completion history, and overdue derivation. Meeting `action_items` and risk arrays remain on parent records for audit, while durable `resolvable_items` child records drive open/resolved visibility in briefing and meeting prep. Briefing rankings explain why each command-center item appears through score reasons, source summaries, owners, due dates, and recommended next actions.
 
 Object listing supports `?company=...` for company-scoped memory browsing. The Memory screen includes the same filter so related company context can be reviewed without switching to company dashboards.
 
@@ -162,11 +166,11 @@ Clarifications are durable review cards generated by deterministic rules. They s
 
 Leadership Advisor reviews are durable, evidence-linked review cards inspired by practical executive operating principles. Capture reviews run after approved capture saves and do not block the save if generation fails. Nightly reviews are idempotent by local date and can be triggered from Render Cron with `POST /leadership-reviews/nightly/run`; manual reviews use `POST /leadership-reviews/generate`. Advisor proposals are staged until the user explicitly applies them from Executive Inbox or the API.
 
-Memory backups use a versioned JSON envelope containing durable memory tables, provenance, revision history, review alerts, integration inbox records, clarifications, dashboard configuration, aliases, captures, and conversations. Import defaults to merge mode; replace mode intentionally clears supported memory tables before restoring the backup.
+Memory backups use a versioned JSON envelope containing durable memory tables, provenance, revision history, review alerts, integration inbox records, clarifications, dashboard configuration, aliases, captures, capture interpretations, capture mutations, and conversations. Import defaults to merge mode; replace mode intentionally clears supported memory tables before restoring the backup.
 
 Related memory views combine explicit `linked_*` fields, reciprocal links, task/meeting source links, attendees, and same-company context so related records can be inspected without duplicating memory.
 
-Capture observability summarizes recent classification sources, fallback frequency, image-unavailable events, and saved-update rates so AI quality and local fallback usage can be monitored.
+Capture observability summarizes recent classification sources, fallback frequency, image-unavailable events, saved-update rates, no-save captures, created-vs-updated mutation counts, task qualification gaps, rejected suggestions, user edits, approved-vs-persisted mismatches, and prompt-version performance so AI quality and local fallback usage can be monitored.
 
 ## Release Checklist
 

@@ -1,18 +1,32 @@
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .ai import SuggestedUpdate, analyze_capture
+from .ai import CAPTURE_PROMPT_VERSION, CaptureAnalysis, SuggestedUpdate, analyze_capture
 from .memory import (
     _company_is_explicitly_negated,
     _detect_positive_company,
     _match_score,
     _normalize_company,
 )
-from .models import CaptureRecord, Company, Decision, Meeting, Metric, Person, Project, SOP, StrategicIssue, Document, Task
+from .models import (
+    CaptureInterpretation,
+    CaptureMutation,
+    CaptureRecord,
+    Company,
+    Decision,
+    Document,
+    Meeting,
+    Metric,
+    Person,
+    Project,
+    SOP,
+    StrategicIssue,
+    Task,
+)
 from .roadmap_services import ensure_provenance, record_revision
 from .resolution_service import resolve_items_from_capture_text
 from .tasks import OPEN_TASK_STATUSES, complete_task, ensure_tasks_for_meeting_action_items, upsert_task_from_update
@@ -155,6 +169,7 @@ def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
                 "type": "strategic_issue",
                 "title": issue.title,
                 "risks": remaining_risks,
+                "field_operations": {"risks": "replace"},
                 "details": f"Remove resolved risk from strategic issue #{issue.id}.",
                 "memory_classification": "confirmed_fact",
                 "verification_state": "user_confirmed",
@@ -175,6 +190,7 @@ def _resolution_suggestions(db: Session, text: str) -> list[dict[str, Any]]:
                 "type": "project",
                 "title": project.title,
                 "risks": remaining_risks,
+                "field_operations": {"risks": "replace"},
                 "details": f"Remove resolved risk from project #{project.id}.",
                 "memory_classification": "confirmed_fact",
                 "verification_state": "user_confirmed",
@@ -389,18 +405,204 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
 
 
 def _memory_context(db: Session) -> str:
-    companies = ", ".join(company.name for company in db.query(Company).all()) or "None"
+    companies = ", ".join(f"company#{company.id}:{company.name}" for company in db.query(Company).limit(100).all()) or "None"
     people = ", ".join(
-        f"{person.name} ({person.role or 'no role'}; {person.company or 'no company'})"
-        for person in db.query(Person).all()
+        f"person#{person.id}:{person.name} ({person.role or 'no role'}; {person.company or 'no company'})"
+        for person in db.query(Person).order_by(Person.updated_at.desc()).limit(100).all()
     ) or "None"
-    issues = ", ".join(issue.title for issue in db.query(StrategicIssue).all()) or "None"
-    return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}"
+    issues = ", ".join(
+        f"strategic_issue#{issue.id}:{issue.title} owner={issue.owner or 'open'} status={issue.status}"
+        for issue in db.query(StrategicIssue).order_by(StrategicIssue.updated_at.desc()).limit(75).all()
+    ) or "None"
+    projects = ", ".join(
+        f"project#{project.id}:{project.title} owner={project.owner or 'open'} status={project.status}"
+        for project in db.query(Project).order_by(Project.updated_at.desc()).limit(75).all()
+    ) or "None"
+    tasks = ", ".join(
+        f"task#{task.id}:{task.title} owner={task.owner or 'open'} assigned_to={task.assigned_to or ''} waiting_on={task.waiting_on or ''} status={task.status}"
+        for task in db.query(Task).filter(Task.status.in_(OPEN_TASK_STATUSES)).order_by(Task.updated_at.desc()).limit(75).all()
+    ) or "None"
+    return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}\nProjects: {projects}\nOpen tasks: {tasks}"
+
+
+def _analysis_to_interpretation(analysis: CaptureAnalysis | None, text: str, updates: list[dict[str, Any]], follow_ups: list[str]) -> dict[str, Any]:
+    if analysis:
+        return analysis.model_dump()
+    summary = text.strip()[:300] or "Screenshot capture could not be interpreted by AI."
+    return {
+        "capture_summary": summary,
+        "capture_purpose": "capture_review",
+        "executive_intent": "review_and_update_memory" if updates else "needs_clarification",
+        "primary_company": _detect_positive_company(text),
+        "primary_subject": "",
+        "primary_topic": "",
+        "urgency": "",
+        "tone": "",
+        "temporal_context": "",
+        "confidence": "local_fallback",
+        "people_roles": [],
+        "statements": [{
+            "source_excerpt": text.strip()[:500],
+            "statement_type": "observation",
+            "company": _detect_positive_company(text),
+            "people": [],
+            "temporal_meaning": "",
+            "confidence": "local_fallback",
+            "changes_existing_memory": bool(updates),
+        }] if text.strip() else [],
+        "open_questions": follow_ups,
+        "ambiguities": [],
+        "source_evidence": [{"type": "typed_text", "excerpt": text.strip()[:500]}] if text.strip() else [],
+        "suggested_updates": updates,
+        "follow_ups": follow_ups,
+    }
+
+
+def _create_capture_record(
+    db: Session,
+    text: str,
+    *,
+    classification_source: str,
+    interpretation_payload: dict[str, Any],
+    approved_updates: list[dict[str, Any]] | None = None,
+    rejected_updates: list[dict[str, Any]] | None = None,
+    saved_record_ids: list[dict[str, Any]] | None = None,
+    processing_events: list[dict[str, Any]] | None = None,
+) -> CaptureRecord:
+    capture = CaptureRecord(
+        raw_text=text,
+        classification_source=classification_source,
+        saved_count=len(approved_updates or []),
+        screenshot_summary=_screenshot_summary_from_interpretation(interpretation_payload),
+        ai_model=os.getenv("OPENAI_MODEL", "local_fallback" if classification_source != "ai" else "gpt-5.6"),
+        prompt_version=CAPTURE_PROMPT_VERSION,
+        structured_interpretation=interpretation_payload,
+        approved_suggestions=approved_updates or [],
+        rejected_suggestions=rejected_updates or [],
+        saved_record_ids=saved_record_ids or [],
+        user_edits=[],
+        processing_events=processing_events or [],
+    )
+    db.add(capture)
+    db.flush()
+    db.refresh(capture)
+    return capture
+
+
+def _screenshot_summary_from_interpretation(interpretation_payload: dict[str, Any]) -> str:
+    evidence = interpretation_payload.get("source_evidence") or []
+    for item in evidence:
+        if isinstance(item, dict) and "screenshot" in str(item.get("type", "")).lower():
+            return str(item.get("summary") or item.get("excerpt") or "")[:2000]
+    return ""
+
+
+def _create_interpretation(db: Session, capture: CaptureRecord, interpretation_payload: dict[str, Any]) -> CaptureInterpretation:
+    interpretation = CaptureInterpretation(
+        capture_id=capture.id,
+        capture_summary=interpretation_payload.get("capture_summary") or "",
+        capture_purpose=interpretation_payload.get("capture_purpose") or "",
+        executive_intent=interpretation_payload.get("executive_intent") or "",
+        primary_company=interpretation_payload.get("primary_company") or "",
+        primary_subject=interpretation_payload.get("primary_subject") or "",
+        primary_topic=interpretation_payload.get("primary_topic") or "",
+        urgency=interpretation_payload.get("urgency") or "",
+        tone=interpretation_payload.get("tone") or "",
+        temporal_context=interpretation_payload.get("temporal_context") or "",
+        confidence=interpretation_payload.get("confidence") or "",
+        model=os.getenv("OPENAI_MODEL", "local_fallback"),
+        prompt_version=CAPTURE_PROMPT_VERSION,
+        people_roles=interpretation_payload.get("people_roles") or [],
+        statements=interpretation_payload.get("statements") or [],
+        open_questions=interpretation_payload.get("open_questions") or interpretation_payload.get("follow_ups") or [],
+        ambiguities=interpretation_payload.get("ambiguities") or [],
+        source_evidence=interpretation_payload.get("source_evidence") or [],
+        raw_response=interpretation_payload,
+    )
+    db.add(interpretation)
+    db.flush()
+    db.refresh(interpretation)
+    return interpretation
+
+
+def _default_field_operations(update: dict[str, Any]) -> dict[str, str]:
+    explicit = update.get("field_operations") or {}
+    operations = dict(explicit) if isinstance(explicit, dict) else {}
+    list_fields = {"risks", "milestones", "next_steps", "responsibilities", "concerns", "action_items", "tags"}
+    for field, value in update.items():
+        if field in {"type", "operation", "matched_record_id", "match_confidence", "field_operations"}:
+            continue
+        if field not in operations and value not in (None, "", []):
+            operations[field] = "append" if field in list_fields else "replace"
+    return operations
+
+
+def _mutation_from_update(
+    db: Session,
+    capture: CaptureRecord,
+    interpretation: CaptureInterpretation,
+    update: dict[str, Any],
+    index: int,
+) -> CaptureMutation:
+    object_type = update.get("type") or "unknown"
+    mutation = CaptureMutation(
+        capture_id=capture.id,
+        interpretation_id=interpretation.id,
+        suggestion_index=index,
+        object_type=object_type,
+        operation=update.get("operation") or ("update" if update.get("matched_record_id") else "create"),
+        status="proposed",
+        matched_record_type=object_type if update.get("matched_record_id") else "",
+        matched_record_id=update.get("matched_record_id"),
+        match_confidence=update.get("match_confidence") or "",
+        evidence_excerpt=update.get("evidence_excerpt") or update.get("source_excerpt") or update.get("details") or capture.raw_text[:500],
+        field_operations=_default_field_operations(update),
+        proposed_values=update,
+        approved_values={},
+        persisted_values={},
+        missing_material_fields=update.get("missing_material_fields") or [],
+        uncertainty=update.get("uncertainty") or "",
+        explanation=update.get("explanation") or update.get("details") or "",
+        user_edits=[],
+    )
+    db.add(mutation)
+    db.flush()
+    db.refresh(mutation)
+    return mutation
+
+
+def create_capture_review(
+    db: Session,
+    text: str,
+    suggested_updates: list[dict[str, Any]],
+    follow_ups: list[str],
+    classification_source: str,
+    analysis: CaptureAnalysis | None = None,
+    *,
+    processing_events: list[dict[str, Any]] | None = None,
+) -> tuple[CaptureRecord, CaptureInterpretation, list[CaptureMutation]]:
+    interpretation_payload = _analysis_to_interpretation(analysis, text, suggested_updates, follow_ups)
+    capture = _create_capture_record(
+        db,
+        text,
+        classification_source=classification_source,
+        interpretation_payload=interpretation_payload,
+        processing_events=processing_events,
+    )
+    interpretation = _create_interpretation(db, capture, interpretation_payload)
+    mutations = [
+        _mutation_from_update(db, capture, interpretation, update, index)
+        for index, update in enumerate(suggested_updates)
+    ]
+    db.commit()
+    db.refresh(capture)
+    db.refresh(interpretation)
+    return capture, interpretation, mutations
 
 
 def _classify_capture_text(
     db: Session, text: str, image_data: str | list[str] = ""
-) -> tuple[list[dict[str, Any]], list[str], str]:
+) -> tuple[list[dict[str, Any]], list[str], str, CaptureAnalysis | None]:
     image_inputs = image_data if isinstance(image_data, list) else ([image_data] if image_data else [])
     resolution_updates = _resolution_suggestions(db, text) if _is_explicit_resolution(text) else []
     analysis = analyze_capture(text, _memory_context(db), image_inputs) if image_inputs else analyze_capture(text, _memory_context(db))
@@ -409,6 +611,7 @@ def _classify_capture_text(
             resolution_updates + [update.model_dump() for update in analysis.suggested_updates],
             analysis.follow_ups,
             "ai",
+            analysis,
         )
     if image_inputs and text.strip():
         updates = resolution_updates + _fallback_classify_capture_text(text)
@@ -418,16 +621,16 @@ def _classify_capture_text(
             follow_ups.append(
                 "What person, company, project, decision, or metric should be saved from this update?"
             )
-        return updates, follow_ups, "local_fallback"
+        return updates, follow_ups, "local_fallback", None
     if image_inputs:
-        return [], [_screenshot_unavailable_message()], "image_unavailable"
+        return [], [_screenshot_unavailable_message()], "image_unavailable", None
     updates = resolution_updates + _fallback_classify_capture_text(text)
     follow_ups = _task_resolution_suggestions(db, text)
     if not updates:
         follow_ups.extend([
         "What person, company, project, decision, or metric should be saved from this update?"
         ])
-    return updates, follow_ups, "local_fallback"
+    return updates, follow_ups, "local_fallback", None
 
 
 def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
@@ -450,9 +653,19 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
     if not instance:
         instance = model(**{identity_field: identity})
     allowed = {column.name for column in model.__table__.columns} - {"id", identity_field}
+    field_operations = update.get("field_operations") or {}
     for field in allowed:
+        operation = field_operations.get(field)
         value = update.get(field)
-        if value not in (None, "", []):
+        if operation == "clear":
+            setattr(instance, field, [] if isinstance(getattr(instance, field, None), list) else "")
+        elif operation in {"remove", "resolve"} and isinstance(getattr(instance, field, None), list):
+            setattr(instance, field, _apply_list_operation(getattr(instance, field) or [], value or [], operation))
+        elif operation == "append" and isinstance(getattr(instance, field, None), list):
+            setattr(instance, field, _apply_list_operation(getattr(instance, field) or [], value or [], operation))
+        elif isinstance(getattr(instance, field, None), list) and value not in (None, "", []):
+            setattr(instance, field, _apply_list_operation(getattr(instance, field) or [], value, "append"))
+        elif value not in (None, "", []):
             setattr(instance, field, value)
     db.add(instance)
     db.flush()
@@ -461,7 +674,26 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
 
 
 def _instance_snapshot(instance: Any) -> dict[str, Any]:
-    return {column.name: getattr(instance, column.key) for column in instance.__table__.columns}
+    def safe(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    return {column.name: safe(getattr(instance, column.key)) for column in instance.__table__.columns}
+
+
+def _apply_list_operation(current: list[Any] | None, incoming: list[Any] | Any, operation: str) -> list[Any]:
+    current_values = list(current or [])
+    incoming_values = incoming if isinstance(incoming, list) else [incoming]
+    incoming_values = [value for value in incoming_values if value not in (None, "")]
+    if operation == "clear":
+        return []
+    if operation == "replace":
+        return list(incoming_values)
+    if operation in {"remove", "resolve"}:
+        normalized_remove = {str(value).strip().lower() for value in incoming_values}
+        return [value for value in current_values if str(value).strip().lower() not in normalized_remove]
+    return list(dict.fromkeys(current_values + incoming_values))
 
 
 def _record_capture_change(db: Session, record_type: str, instance: Any, text: str, change_type: str) -> None:
@@ -540,7 +772,8 @@ def _apply_approved_updates(
     text: str,
     approved_updates: list[SuggestedUpdate | dict[str, Any]],
     classification_source: str = "unknown",
-) -> None:
+    capture_id: int | None = None,
+) -> CaptureRecord:
     lowered = text.lower()
     detected_name = ""
     for candidate in ["Julio", "Mina"]:
@@ -550,8 +783,12 @@ def _apply_approved_updates(
 
     explicit_company = _detect_positive_company(text)
 
-    for raw_update in approved_updates:
+    saved_record_ids: list[dict[str, Any]] = []
+    approved_payloads: list[dict[str, Any]] = []
+    persisted_by_index: dict[int, dict[str, Any]] = {}
+    for update_index, raw_update in enumerate(approved_updates):
         update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
+        approved_payloads.append(update)
         update_type = update.get("type")
         saved_instance = None
         update_name = update.get("name") or detected_name
@@ -592,8 +829,15 @@ def _apply_approved_updates(
                 issue.current_thinking = (
                     update.get("current_thinking") or update.get("details") or issue.current_thinking
                 )
+                field_operations = update.get("field_operations") or {}
+                if field_operations.get("owner") == "clear":
+                    issue.owner = ""
                 if "risks" in update and update.get("risks") is not None:
-                    issue.risks = update["risks"]
+                    issue.risks = _apply_list_operation(
+                        issue.risks or [],
+                        update["risks"],
+                        field_operations.get("risks") or "append",
+                    )
                 issue.status = update.get("status") or issue.status
                 db.flush()
         elif update_type == "company" and update_name:
@@ -638,6 +882,19 @@ def _apply_approved_updates(
                     update = {**update, detail_field: update["details"]}
             handled = _apply_generic_update(db, update)
             saved_instance = handled if handled is not True and handled is not False else None
+            if saved_instance is not None and update_type == "project":
+                field_operations = update.get("field_operations") or {}
+                project = saved_instance
+                for field in ("risks", "milestones", "next_steps"):
+                    if field in update:
+                        setattr(project, field, _apply_list_operation(
+                            getattr(project, field) or [],
+                            update[field],
+                            field_operations.get(field) or "append",
+                        ))
+                if field_operations.get("owner") == "clear":
+                    project.owner = ""
+                db.flush()
             if handled and update_type == "meeting":
                 meeting_title = update.get("title")
                 if meeting_title:
@@ -645,6 +902,12 @@ def _apply_approved_updates(
                     if meeting:
                         ensure_tasks_for_meeting_action_items(db, meeting)
         if saved_instance is not None and getattr(saved_instance, "id", None):
+            saved_record_ids.append({
+                "type": update_type,
+                "id": saved_instance.id,
+                "suggestion_index": update_index,
+            })
+            persisted_by_index[update_index] = _instance_snapshot(saved_instance)
             source_type = update.get("source_type") or ("capture_text" if classification_source != "manual" else "manual_entry")
             ensure_provenance(
                 db,
@@ -670,9 +933,85 @@ def _apply_approved_updates(
     _apply_explicit_resolution(db, text)
     resolve_items_from_capture_text(db, text, actor="user")
 
-    db.add(CaptureRecord(
-        raw_text=text,
-        classification_source=classification_source,
-        saved_count=len(approved_updates),
-    ))
+    capture = db.get(CaptureRecord, capture_id) if capture_id else None
+    if capture:
+        capture.saved_count = len(approved_updates)
+        capture.classification_source = classification_source or capture.classification_source
+        capture.approved_suggestions = approved_payloads
+        proposed_updates = []
+        if isinstance(capture.structured_interpretation, dict):
+            proposed_updates = capture.structured_interpretation.get("suggested_updates") or []
+        approved_indexes = {
+            index for index, proposed in enumerate(proposed_updates)
+            if any(proposed == approved for approved in approved_payloads)
+        }
+        capture.rejected_suggestions = [
+            proposed for index, proposed in enumerate(proposed_updates)
+            if index not in approved_indexes
+        ]
+        capture.saved_record_ids = saved_record_ids
+        events = list(capture.processing_events or [])
+        events.append({
+            "event": "approved_updates_saved",
+            "saved_count": len(approved_updates),
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+        capture.processing_events = events
+        db.add(capture)
+    else:
+        interpretation_payload = _analysis_to_interpretation(None, text, approved_payloads, [])
+        capture = _create_capture_record(
+            db,
+            text,
+            classification_source=classification_source,
+            interpretation_payload=interpretation_payload,
+            approved_updates=approved_payloads,
+            saved_record_ids=saved_record_ids,
+            processing_events=[{
+                "event": "approved_updates_saved_without_prior_review_record",
+                "saved_count": len(approved_updates),
+                "at": datetime.now(timezone.utc).isoformat(),
+            }],
+        )
+        interpretation = _create_interpretation(db, capture, interpretation_payload)
+        for index, update in enumerate(approved_payloads):
+            _mutation_from_update(db, capture, interpretation, update, index)
+
+    mutations = db.query(CaptureMutation).filter(CaptureMutation.capture_id == capture.id).all()
+    approved_mutation_ids: set[int] = set()
+    for update_index, update in enumerate(approved_payloads):
+        matched_mutation = None
+        for mutation in mutations:
+            if mutation.status == "proposed" and mutation.proposed_values == update:
+                matched_mutation = mutation
+                break
+        if matched_mutation is None:
+            interpretation = (
+                db.query(CaptureInterpretation)
+                .filter(CaptureInterpretation.capture_id == capture.id)
+                .order_by(CaptureInterpretation.id.desc())
+                .first()
+            )
+            if interpretation is None:
+                interpretation_payload = _analysis_to_interpretation(None, text, approved_payloads, [])
+                interpretation = _create_interpretation(db, capture, interpretation_payload)
+            matched_mutation = _mutation_from_update(db, capture, interpretation, update, update_index)
+            mutations.append(matched_mutation)
+        matched_mutation.status = "approved_applied"
+        matched_mutation.approved_values = update
+        matched_mutation.persisted_values = persisted_by_index.get(update_index, {})
+        saved = next((item for item in saved_record_ids if item["suggestion_index"] == update_index), None)
+        if saved:
+            matched_mutation.saved_record_type = saved["type"]
+            matched_mutation.saved_record_id = saved["id"]
+        matched_mutation.applied_at = datetime.now(timezone.utc)
+        db.add(matched_mutation)
+        if matched_mutation.id:
+            approved_mutation_ids.add(matched_mutation.id)
+    for mutation in mutations:
+        if mutation.status == "proposed" and mutation.id not in approved_mutation_ids:
+            mutation.status = "rejected"
+            db.add(mutation)
     db.commit()
+    db.refresh(capture)
+    return capture

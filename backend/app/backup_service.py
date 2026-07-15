@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from .models import (
     BriefingView,
+    CaptureInterpretation,
+    CaptureMutation,
     CaptureRecord,
     Clarification,
     Company,
@@ -43,6 +45,8 @@ BACKUP_MODELS = [
     Metric,
     Task,
     CaptureRecord,
+    CaptureInterpretation,
+    CaptureMutation,
     BriefingView,
     ProvenanceRecord,
     RevisionRecord,

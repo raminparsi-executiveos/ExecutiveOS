@@ -77,6 +77,7 @@ class CaptureConfirmationRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
     approved_updates: list[SuggestedUpdate] = Field(default_factory=list, max_length=50)
     classification_source: str = Field(default="unknown", max_length=50)
+    capture_id: int | None = Field(default=None, ge=1)
 
 
 class ReviewAlertResolutionRequest(BaseModel):

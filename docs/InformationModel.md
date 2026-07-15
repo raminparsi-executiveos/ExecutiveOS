@@ -15,8 +15,10 @@ ExecutiveOS stores executive memory as typed objects plus immutable capture hist
 | `SOP` | Operating process with purpose, owner, process details, escalation rules, and related projects. |
 | `Document` | Reference document metadata and summary. |
 | `Metric` | KPI or measurement with value, date, trend, and related issue. |
-| `Task` | Action item or commitment with owner, due date, status, priority, source metadata, blocker, next action, tags, completion history, and review timestamp. |
-| `CaptureRecord` | Raw confirmed capture text, classification source, saved count, and timestamp. |
+| `Task` | Action item, commitment, or standing responsibility with accountable owner, assigned performer, delegated-by person, waiting-on party, deliverable, definition of done, dependencies, due/follow-up dates, recurrence, source excerpt, status, priority, source metadata, blocker, next action, tags, completion history, and review timestamp. |
+| `CaptureRecord` | Immutable source capture with raw text, screenshot evidence summary, classification source, model, prompt version, structured interpretation response, approved/rejected suggestions, saved record IDs, user edits, processing events, saved count, and timestamp. |
+| `CaptureInterpretation` | AI or fallback interpretation linked to a capture, including summary, purpose, executive intent, primary company/subject/topic, urgency, tone, temporal context, confidence, people roles, typed statements, questions, ambiguities, source evidence, model, and prompt version. |
+| `CaptureMutation` | Reviewable proposed record mutation linked to a capture and interpretation, including object type, create/update/merge/resolve/supersede/no-change operation, matched record ID, field-level operations, evidence excerpt, missing material fields, uncertainty, approval status, persisted values, and saved record ID. |
 | `BriefingView` | Per-user last briefing view timestamp used to compute changed-since-last-briefing sections. |
 | `ProvenanceRecord` | Source traceability for memory records, including source type, identifier, excerpt, verification, classification, and supersession fields. |
 | `RevisionRecord` | Auditable before/after snapshots for creates, edits, deletes, capture approvals, and inbox approvals. |
@@ -45,6 +47,8 @@ The object listing and creation endpoints use these path names:
 
 - Supported statuses are `open`, `in_progress`, `waiting`, `blocked`, `completed`, and `cancelled`.
 - Supported priorities are `critical`, `high`, `medium`, and `low`.
+- `owner` means accountable for eventual completion. `assigned_to` means the person performing the work. `delegated_by` means the person who requested it. `waiting_on` means the external person or party blocking progress.
+- Capture-created tasks should preserve expected deliverable, definition of done, why it matters, source excerpt, confidence, and material missing fields when available.
 - Completed and cancelled tasks remain stored, searchable, and auditable.
 - Overdue is derived from an ISO `due_date` when the task status is not completed or cancelled.
 - Meeting `action_items` are preserved on the meeting record, with linked task records created for workflow tracking.
@@ -54,10 +58,13 @@ The object listing and creation endpoints use these path names:
 
 - Suggestions must map to one of the supported object types.
 - Raw notes are not stored as first-class memory objects.
-- Capture records preserve the confirmed input as audit and search context.
+- Capture records preserve the original input separately from AI interpretation and approved durable values.
+- Capture interpretations and mutations are stored before approval so rejected suggestions, user edits, and omitted context remain auditable.
+- Proposed mutations must describe field-level behavior such as append, replace, remove, clear, resolve, supersede, or no-change rather than relying on blank values.
 - Screenshots are not persisted as images.
 - Approved structured values are authoritative when they conflict with heuristic text detection.
 - Approved commitments and action items may create task records after user review.
+- `GET /captures/{capture_id}/audit` compares original input, AI interpretation, approved mutation, actual saved values, linked record IDs, and unresolved context.
 
 ## Generated Outputs
 

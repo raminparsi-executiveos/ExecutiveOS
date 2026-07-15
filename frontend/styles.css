@@ -660,6 +660,48 @@ select {
   color: #0f172a;
 }
 
+.audit-table {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.audit-header {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+}
+
+.audit-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-row pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .audit-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .memory-list {
   display: grid;
   gap: 10px;

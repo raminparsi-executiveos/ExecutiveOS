@@ -181,6 +181,7 @@ def upsert_task_from_update(
     validate_task_attributes({"title": title, "status": status, "priority": priority}, fallback_unknown=True)
     source_type = update.get("source_type") or default_source_type
     source_id = str(update.get("source_id") or "")
+    field_operations = update.get("field_operations") or {}
     query = db.query(Task).filter(Task.title.ilike(title))
     if source_type:
         query = query.filter(Task.source_type == source_type)
@@ -190,9 +191,18 @@ def upsert_task_from_update(
     for field in (
         "description", "owner", "due_date", "status", "priority", "source_type",
         "source_id", "source_summary", "next_action", "blocked_by", "tags",
+        "expected_deliverable", "definition_of_done", "why_it_matters",
+        "delegated_by", "assigned_to", "waiting_on", "stakeholders",
+        "dependencies", "follow_up_date", "recurrence", "task_type",
+        "confidence", "interpretation_notes", "source_excerpt",
+        "parent_task_id", "linked_project_ids", "linked_decision_ids",
+        "linked_people",
     ):
         value = update.get(field)
-        if value not in (None, "", []):
+        if field_operations.get(field) == "clear":
+            current_value = getattr(task, field, "")
+            setattr(task, field, [] if isinstance(current_value, list) else "")
+        elif value not in (None, "", []):
             setattr(task, field, value)
     task.company = update.get("company") or default_company or task.company
     task.source_type = task.source_type or source_type

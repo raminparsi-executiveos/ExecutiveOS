@@ -169,6 +169,24 @@ class Task(TimestampMixin, Base):
     next_action = Column(Text, default="")
     blocked_by = Column(Text, default="")
     tags = Column(JSON, default=list)
+    expected_deliverable = Column(Text, default="")
+    definition_of_done = Column(Text, default="")
+    why_it_matters = Column(Text, default="")
+    delegated_by = Column(String, default="")
+    assigned_to = Column(String, default="")
+    waiting_on = Column(String, default="")
+    stakeholders = Column(JSON, default=list)
+    dependencies = Column(JSON, default=list)
+    follow_up_date = Column(String, default="")
+    recurrence = Column(String, default="")
+    task_type = Column(String, default="")
+    confidence = Column(String, default="")
+    interpretation_notes = Column(Text, default="")
+    source_excerpt = Column(Text, default="")
+    parent_task_id = Column(Integer, nullable=True, index=True)
+    linked_project_ids = Column(JSON, default=list)
+    linked_decision_ids = Column(JSON, default=list)
+    linked_people = Column(JSON, default=list)
 
 
 class CaptureRecord(Base):
@@ -178,7 +196,68 @@ class CaptureRecord(Base):
     raw_text = Column(Text, nullable=False)
     classification_source = Column(String, default="unknown")
     saved_count = Column(Integer, default=0)
+    screenshot_summary = Column(Text, default="")
+    ai_model = Column(String, default="")
+    prompt_version = Column(String, default="")
+    structured_interpretation = Column(JSON, default=dict)
+    approved_suggestions = Column(JSON, default=list)
+    rejected_suggestions = Column(JSON, default=list)
+    saved_record_ids = Column(JSON, default=list)
+    user_edits = Column(JSON, default=list)
+    processing_events = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class CaptureInterpretation(TimestampMixin, Base):
+    __tablename__ = "capture_interpretations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    capture_id = Column(Integer, index=True, nullable=False)
+    capture_summary = Column(Text, default="")
+    capture_purpose = Column(String, default="")
+    executive_intent = Column(String, default="")
+    primary_company = Column(String, default="", index=True)
+    primary_subject = Column(String, default="")
+    primary_topic = Column(String, default="")
+    urgency = Column(String, default="")
+    tone = Column(String, default="")
+    temporal_context = Column(String, default="")
+    confidence = Column(String, default="")
+    model = Column(String, default="")
+    prompt_version = Column(String, default="", index=True)
+    people_roles = Column(JSON, default=list)
+    statements = Column(JSON, default=list)
+    open_questions = Column(JSON, default=list)
+    ambiguities = Column(JSON, default=list)
+    source_evidence = Column(JSON, default=list)
+    raw_response = Column(JSON, default=dict)
+
+
+class CaptureMutation(TimestampMixin, Base):
+    __tablename__ = "capture_mutations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    capture_id = Column(Integer, index=True, nullable=False)
+    interpretation_id = Column(Integer, nullable=True, index=True)
+    suggestion_index = Column(Integer, default=0, index=True)
+    object_type = Column(String, index=True, nullable=False)
+    operation = Column(String, default="create", index=True)
+    status = Column(String, default="proposed", index=True)
+    matched_record_type = Column(String, default="", index=True)
+    matched_record_id = Column(Integer, nullable=True, index=True)
+    match_confidence = Column(String, default="")
+    evidence_excerpt = Column(Text, default="")
+    field_operations = Column(JSON, default=dict)
+    proposed_values = Column(JSON, default=dict)
+    approved_values = Column(JSON, default=dict)
+    persisted_values = Column(JSON, default=dict)
+    saved_record_type = Column(String, default="", index=True)
+    saved_record_id = Column(Integer, nullable=True, index=True)
+    missing_material_fields = Column(JSON, default=list)
+    uncertainty = Column(Text, default="")
+    explanation = Column(Text, default="")
+    user_edits = Column(JSON, default=list)
+    applied_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class BriefingView(Base):

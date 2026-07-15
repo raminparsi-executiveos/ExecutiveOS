@@ -1,5 +1,6 @@
 const sections = [
   { key: 'capture', label: 'Capture' },
+  { key: 'captureAudit', label: 'Capture Audit' },
   { key: 'briefing', label: 'Morning Briefing' },
   { key: 'inbox', label: 'Executive Inbox' },
   { key: 'prep', label: 'Meeting Prep' },
@@ -571,6 +572,9 @@ let classificationResult = null;
 let selectedUpdateIndices = [];
 let captureObservability = null;
 let captureObservabilityLoading = false;
+let captureAuditList = null;
+let captureAuditLoading = false;
+let captureAuditDetail = null;
 let apiError = null;
 let briefingLoading = false;
 let submitting = false;
@@ -609,6 +613,24 @@ async function safeJsonFetch(url, options) {
     throw new Error('The API returned an unexpected response');
   }
   return response.json();
+}
+
+async function loadCaptureAudit(captureId = null) {
+  if (captureAuditLoading) return;
+  captureAuditLoading = true;
+  try {
+    if (captureId) {
+      captureAuditDetail = await safeJsonFetch(apiUrl(`/captures/${captureId}/audit`));
+    } else {
+      captureAuditList = await safeJsonFetch(apiUrl('/captures?limit=25'));
+    }
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    captureAuditLoading = false;
+    render();
+  }
 }
 
 async function loadMemoryObjects() {
@@ -1064,6 +1086,7 @@ function render() {
               text: captureText.trim() || `Screenshot capture: ${screenshots.map((screenshot) => screenshot.name).join(', ')}`,
               approved_updates: approvedUpdates,
               classification_source: classificationResult?.classification_source || 'unknown',
+              capture_id: classificationResult?.capture_id || null,
             }),
           });
           // Generated outputs are disposable views over memory. Invalidate them
@@ -1073,6 +1096,8 @@ function render() {
           meetingPrep = null;
           searchResults = null;
           captureObservability = null;
+          captureAuditList = null;
+          captureAuditDetail = null;
           classificationResult = null;
           selectedUpdateIndices = [];
           captureText = '';
@@ -1099,6 +1124,23 @@ function render() {
           selectedUpdateIndices = selectedUpdateIndices.filter((value) => value !== index);
         }
         render();
+      });
+    });
+    app.querySelector('[data-open-capture-audit]')?.addEventListener('click', () => {
+      const captureId = Number(captureResult?.capture_id || 0);
+      if (!captureId) return;
+      active = 'captureAudit';
+      captureAuditDetail = null;
+      loadCaptureAudit(captureId);
+      render();
+    });
+  }
+
+  if (active === 'captureAudit') {
+    app.querySelectorAll('[data-load-capture-audit]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const captureId = Number(button.getAttribute('data-load-capture-audit'));
+        loadCaptureAudit(captureId);
       });
     });
   }
@@ -1577,6 +1619,7 @@ function renderPanel() {
       ` : ''}
       ${captureResult ? `
         <p class="success" role="status">${escapeHtml(captureResult.saved_count)} approved update${captureResult.saved_count === 1 ? '' : 's'} saved. Briefing, meeting prep, and search will now use the refreshed memory.</p>
+        ${captureResult.capture_id ? `<button type="button" class="secondary" data-open-capture-audit>View capture audit</button>` : ''}
         ${captureResult.leadership_review ? renderLeadershipReviewSummary(captureResult.leadership_review) : ''}
         ${captureResult.leadership_review_error ? `<p class="muted">${escapeHtml(captureResult.leadership_review_error)}</p>` : ''}
       ` : ''}
@@ -1592,6 +1635,72 @@ function renderPanel() {
           </div>
         </details>
       ` : ''}
+    `;
+  }
+
+  if (active === 'captureAudit') {
+    if (!captureAuditList && !captureAuditLoading) {
+      loadCaptureAudit();
+    }
+    const detail = captureAuditDetail;
+    return `
+      <h2>Capture Audit</h2>
+      <p>Compare original capture input, AI interpretation, approved mutations, and actual saved values.</p>
+      ${captureAuditLoading ? '<p>Loading capture audit…</p>' : ''}
+      ${detail ? `
+        <div class="backup-panel">
+          <div class="section-heading">
+            <h3>Capture #${escapeHtml(detail.capture?.id || '')}</h3>
+            <span class="badge">${escapeHtml(detail.capture?.classification_source || 'unknown')}</span>
+          </div>
+          <p><strong>Original input</strong></p>
+          <p>${escapeHtml(detail.capture?.raw_text || '')}</p>
+          ${detail.interpretation ? `
+            <p><strong>AI interpretation</strong></p>
+            <p>${escapeHtml(detail.interpretation.capture_summary || '')}</p>
+            <div class="capture-quality">
+              <span><strong>${escapeHtml(detail.interpretation.executive_intent || 'Intent')}</strong> intent</span>
+              <span><strong>${escapeHtml(detail.interpretation.primary_company || 'No company')}</strong> company</span>
+              <span><strong>${escapeHtml(detail.interpretation.confidence || 'Unknown')}</strong> confidence</span>
+              <span><strong>${escapeHtml(detail.interpretation.prompt_version || '')}</strong> prompt</span>
+            </div>
+          ` : ''}
+          <div class="audit-table" role="table" aria-label="Capture comparison">
+            <div class="audit-row audit-header" role="row">
+              <span>Original input</span>
+              <span>AI interpretation</span>
+              <span>Approved mutation</span>
+              <span>Actual saved value</span>
+              <span>Omitted or unresolved</span>
+            </div>
+            ${(detail.comparison || []).map((row) => `
+              <div class="audit-row" role="row">
+                <span>${escapeHtml(row.original_input || '')}</span>
+                <span>${escapeHtml(row.ai_interpretation || '')}</span>
+                <span><pre>${escapeHtml(JSON.stringify(row.approved_mutation || {}, null, 2))}</pre></span>
+                <span><pre>${escapeHtml(JSON.stringify(row.actual_saved_value || {}, null, 2))}</pre></span>
+                <span>${escapeHtml([...(row.omitted_or_unresolved_context?.missing_material_fields || []), row.omitted_or_unresolved_context?.uncertainty || '', row.omitted_or_unresolved_context?.status || ''].filter(Boolean).join(' · '))}</span>
+              </div>
+            `).join('') || '<p class="muted">No mutation rows were recorded for this capture.</p>'}
+          </div>
+        </div>
+      ` : ''}
+      <div class="backup-panel">
+        <div class="section-heading">
+          <h3>Recent captures</h3>
+          <button type="button" class="secondary" onclick="void 0" data-load-capture-audit="">Refresh</button>
+        </div>
+        ${(captureAuditList?.items || []).map((capture) => `
+          <div class="memory-row">
+            <div>
+              <strong>Capture #${escapeHtml(capture.id)}</strong>
+              <p>${escapeHtml(capture.raw_text || '')}</p>
+              <small>${escapeHtml(capture.created_at || '')} · ${escapeHtml(capture.classification_source || 'unknown')} · ${escapeHtml(capture.saved_count || 0)} saved</small>
+            </div>
+            <button type="button" class="secondary" data-load-capture-audit="${escapeHtml(capture.id)}">Open audit</button>
+          </div>
+        `).join('') || '<p class="muted">No captures found yet.</p>'}
+      </div>
     `;
   }
 
