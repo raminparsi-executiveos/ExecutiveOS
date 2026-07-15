@@ -668,7 +668,7 @@ select {
 
 .audit-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(130px, 0.8fr);
   gap: 8px;
   align-items: stretch;
   border: 1px solid #e2e8f0;
@@ -694,6 +694,17 @@ select {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 0.75rem;
+}
+
+.audit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+}
+
+.audit-actions button {
+  padding: 7px 9px;
 }
 
 @media (max-width: 900px) {

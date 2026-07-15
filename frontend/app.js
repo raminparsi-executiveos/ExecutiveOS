@@ -21,6 +21,19 @@ const memoryTypes = [
   { key: 'tasks', label: 'Tasks', titleField: 'title' },
 ];
 
+const auditRecordTypeToMemoryType = {
+  company: 'companies',
+  person: 'people',
+  strategic_issue: 'strategic-issues',
+  project: 'projects',
+  decision: 'decisions',
+  meeting: 'meetings',
+  sop: 'sops',
+  document: 'documents',
+  metric: 'metrics',
+  task: 'tasks',
+};
+
 const app = document.getElementById('app');
 const configuredApiBase = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').trim();
 const API_BASE = (/^https?:\/\//i.test(configuredApiBase) ? configuredApiBase : `https://${configuredApiBase}`).replace(/\/$/, '');
@@ -650,6 +663,50 @@ async function loadMemoryObjects() {
   }
 }
 
+async function openAuditLinkedRecord(recordType, recordId, mode = 'view') {
+  const mappedType = auditRecordTypeToMemoryType[recordType] || recordType;
+  const id = Number(recordId);
+  if (!mappedType || !id) {
+    setApiError('This audit row is not linked to a saved memory record.');
+    return;
+  }
+  submitting = true;
+  render();
+  try {
+    const objects = await safeJsonFetch(apiUrl(`/objects/${mappedType}`));
+    const item = (objects.items || []).find((candidate) => Number(candidate.id) === id);
+    if (!item) {
+      throw new Error(`Saved ${humanize(recordType)} #${id} was not found.`);
+    }
+    memoryType = mappedType;
+    memoryObjects = objects;
+    memoryCompanyFilter = '';
+    memoryMessage = '';
+    memoryRelated = null;
+    memoryEdit = null;
+    if (mode === 'edit') {
+      const selectedType = currentMemoryType();
+      memoryEdit = {
+        id,
+        title: item[selectedType.titleField] || `${selectedType.label} #${id}`,
+        text: JSON.stringify(editableObjectAttributes(item), null, 2),
+      };
+    } else if (mode === 'related') {
+      memoryRelated = await safeJsonFetch(apiUrl(`/objects/${mappedType}/${id}/related`));
+    } else {
+      memoryMessage = `Opened ${humanize(recordType)} #${id}.`;
+    }
+    active = 'memory';
+    apiError = null;
+  } catch (error) {
+    setApiError(error.message);
+  } finally {
+    submitting = false;
+  }
+  render();
+  if (mode === 'edit' || mode === 'related') scrollMemoryDetailIntoView();
+}
+
 async function loadExecutiveInbox() {
   executiveInboxLoading = true;
   executiveInboxMessage = '';
@@ -1140,7 +1197,20 @@ function render() {
     app.querySelectorAll('[data-load-capture-audit]').forEach((button) => {
       button.addEventListener('click', () => {
         const captureId = Number(button.getAttribute('data-load-capture-audit'));
-        loadCaptureAudit(captureId);
+        if (captureId) loadCaptureAudit(captureId);
+      });
+    });
+    app.querySelector('[data-refresh-capture-audits]')?.addEventListener('click', () => {
+      captureAuditList = null;
+      loadCaptureAudit();
+    });
+    app.querySelectorAll('[data-audit-memory-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openAuditLinkedRecord(
+          button.getAttribute('data-record-type'),
+          button.getAttribute('data-record-id'),
+          button.getAttribute('data-audit-memory-action'),
+        );
       });
     });
   }
@@ -1672,6 +1742,7 @@ function renderPanel() {
               <span>Approved mutation</span>
               <span>Actual saved value</span>
               <span>Omitted or unresolved</span>
+              <span>Actions</span>
             </div>
             ${(detail.comparison || []).map((row) => `
               <div class="audit-row" role="row">
@@ -1680,6 +1751,13 @@ function renderPanel() {
                 <span><pre>${escapeHtml(JSON.stringify(row.approved_mutation || {}, null, 2))}</pre></span>
                 <span><pre>${escapeHtml(JSON.stringify(row.actual_saved_value || {}, null, 2))}</pre></span>
                 <span>${escapeHtml([...(row.omitted_or_unresolved_context?.missing_material_fields || []), row.omitted_or_unresolved_context?.uncertainty || '', row.omitted_or_unresolved_context?.status || ''].filter(Boolean).join(' · '))}</span>
+                <span class="audit-actions">
+                  ${row.linked_record?.type && row.linked_record?.id ? `
+                    <button type="button" class="secondary" data-audit-memory-action="view" data-record-type="${escapeHtml(row.linked_record.type)}" data-record-id="${escapeHtml(row.linked_record.id)}">View</button>
+                    <button type="button" class="secondary" data-audit-memory-action="edit" data-record-type="${escapeHtml(row.linked_record.type)}" data-record-id="${escapeHtml(row.linked_record.id)}">Edit</button>
+                    <button type="button" class="secondary" data-audit-memory-action="related" data-record-type="${escapeHtml(row.linked_record.type)}" data-record-id="${escapeHtml(row.linked_record.id)}">Related</button>
+                  ` : '<small class="muted">No saved record</small>'}
+                </span>
               </div>
             `).join('') || '<p class="muted">No mutation rows were recorded for this capture.</p>'}
           </div>
@@ -1688,7 +1766,7 @@ function renderPanel() {
       <div class="backup-panel">
         <div class="section-heading">
           <h3>Recent captures</h3>
-          <button type="button" class="secondary" onclick="void 0" data-load-capture-audit="">Refresh</button>
+          <button type="button" class="secondary" data-refresh-capture-audits>Refresh</button>
         </div>
         ${(captureAuditList?.items || []).map((capture) => `
           <div class="memory-row">
