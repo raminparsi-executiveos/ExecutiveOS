@@ -42,6 +42,32 @@ WAITING_ITEM_STOP_WORDS = {
 
 RESOLUTION_WORDS = {"resolved", "complete", "completed", "done", "closed", "fixed"}
 
+INVALID_TASK_OWNERS = {
+    "feedback",
+    "i",
+    "it",
+    "someone",
+    "that",
+    "the team",
+    "this",
+    "we",
+    "you",
+}
+
+WEAK_TASK_TITLE_PATTERNS = (
+    r"^come up with (?:new )?strategy$",
+    r"^discuss sales activities and outlook$",
+    r"^get (?:us|our) (?:to )?(?:our )?numbers$",
+    r"^get our year back on track$",
+    r"^review prior to each sales check in$",
+)
+
+NON_ACTION_CONTEXT_PATTERNS = (
+    r"\bwill\s+be\s+(?:provided|selected|used|discussed|reviewed|captured)\b",
+    r"\b(?:is|are|was|were)\s+(?:a|an|the)?\s*(?:current\s+)?(?:client|owner|lead|manager|provider)\b",
+    r"\bthis\s+will\s+require\b",
+)
+
 
 def _screenshot_unavailable_message() -> str:
     if not os.getenv("OPENAI_API_KEY"):
@@ -287,6 +313,63 @@ def _title_from_action(action: str) -> str:
     return cleaned[0].upper() + cleaned[1:]
 
 
+def _normalize_owner(value: str) -> str:
+    owner = " ".join(str(value or "").strip(" :-").split())
+    if owner.lower() in INVALID_TASK_OWNERS:
+        return ""
+    if re.fullmatch(r"(?:this|that|it|we|i|you|feedback)", owner, flags=re.IGNORECASE):
+        return ""
+    return owner
+
+
+def _normalize_task_status_for_capture(status: str, text: str) -> str:
+    normalized = str(status or "open").strip().lower()
+    if normalized == "completed" and not _is_explicit_resolution(text):
+        return "open"
+    return status or "open"
+
+
+def _is_weak_task_update(update: dict[str, Any], *, classification_source: str) -> bool:
+    if update.get("type") != "task":
+        return False
+    title = re.sub(r"\s+", " ", str(update.get("title") or "").strip().lower())
+    source_excerpt = str(update.get("source_excerpt") or update.get("evidence_excerpt") or "").strip()
+    if not title:
+        return True
+    if any(re.search(pattern, title, flags=re.IGNORECASE) for pattern in WEAK_TASK_TITLE_PATTERNS):
+        return True
+    if classification_source == "local_fallback" and any(re.search(pattern, source_excerpt, flags=re.IGNORECASE) for pattern in NON_ACTION_CONTEXT_PATTERNS):
+        return not (update.get("owner") or update.get("assigned_to") or update.get("waiting_on"))
+    if classification_source == "local_fallback":
+        has_accountability = bool(update.get("owner") or update.get("assigned_to") or update.get("waiting_on"))
+        has_action_shape = bool(re.search(
+            r"\b(?:will|send|review|get|confirm|prepare|complete|transition|log|offer|close|schedule|decide|build|create|come up with|follow up|follow-up)\b",
+            title,
+            flags=re.IGNORECASE,
+        ))
+        if not has_accountability and not has_action_shape:
+            return True
+    return False
+
+
+def _prepare_task_update_for_capture(
+    update: dict[str, Any],
+    text: str,
+    *,
+    classification_source: str,
+) -> dict[str, Any] | None:
+    if update.get("type") != "task":
+        return update
+    prepared = dict(update)
+    for field in ("owner", "assigned_to", "delegated_by", "waiting_on"):
+        if field in prepared:
+            prepared[field] = _normalize_owner(prepared.get(field) or "")
+    prepared["status"] = _normalize_task_status_for_capture(prepared.get("status") or "open", text)
+    if _is_weak_task_update(prepared, classification_source=classification_source):
+        return None
+    return prepared
+
+
 def _task_update(
     title: str,
     text: str,
@@ -312,9 +395,9 @@ def _task_update(
         "title": title,
         "description": source_excerpt or title,
         "company": company,
-        "owner": owner,
-        "assigned_to": assigned_to,
-        "waiting_on": waiting_on,
+        "owner": _normalize_owner(owner),
+        "assigned_to": _normalize_owner(assigned_to),
+        "waiting_on": _normalize_owner(waiting_on),
         "due_date": due_date,
         "status": "open",
         "priority": "medium",
@@ -341,6 +424,10 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
     seen_titles: set[str] = set()
 
     def add(update: dict[str, Any]) -> None:
+        prepared = _prepare_task_update_for_capture(update, text, classification_source="local_fallback")
+        if prepared is None:
+            return
+        update = prepared
         title = update.get("title", "")
         normalized = re.sub(r"\s+", " ", title.lower()).strip()
         if not normalized or normalized in seen_titles:
@@ -631,6 +718,28 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
     return updates
 
 
+def _prepare_capture_updates(
+    updates: list[dict[str, Any]],
+    text: str,
+    *,
+    classification_source: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    prepared_updates: list[dict[str, Any]] = []
+    follow_ups: list[str] = []
+    skipped_task_count = 0
+    for update in updates:
+        prepared = _prepare_task_update_for_capture(update, text, classification_source=classification_source)
+        if prepared is None:
+            skipped_task_count += 1
+            continue
+        prepared_updates.append(prepared)
+    if skipped_task_count:
+        follow_ups.append(
+            f"{skipped_task_count} weak task suggestion{'s were' if skipped_task_count != 1 else ' was'} held back because the capture did not include enough owner, outcome, or action context."
+        )
+    return prepared_updates, follow_ups
+
+
 def _memory_context(db: Session) -> str:
     companies = ", ".join(f"company#{company.id}:{company.name}" for company in db.query(Company).limit(100).all()) or "None"
     people = ", ".join(
@@ -834,15 +943,25 @@ def _classify_capture_text(
     resolution_updates = _resolution_suggestions(db, text) if _is_explicit_resolution(text) else []
     analysis = analyze_capture(text, _memory_context(db), image_inputs) if image_inputs else analyze_capture(text, _memory_context(db))
     if analysis:
+        prepared_updates, quality_follow_ups = _prepare_capture_updates(
+            resolution_updates + [update.model_dump() for update in analysis.suggested_updates],
+            text,
+            classification_source="ai",
+        )
         return (
-            enrich_updates_with_leadership_lens(resolution_updates + [update.model_dump() for update in analysis.suggested_updates]),
-            analysis.follow_ups,
+            enrich_updates_with_leadership_lens(prepared_updates),
+            analysis.follow_ups + quality_follow_ups,
             "ai",
             analysis,
         )
     if image_inputs and text.strip():
-        updates = resolution_updates + _fallback_classify_capture_text(text)
+        updates, quality_follow_ups = _prepare_capture_updates(
+            resolution_updates + _fallback_classify_capture_text(text),
+            text,
+            classification_source="local_fallback",
+        )
         follow_ups = _task_resolution_suggestions(db, text)
+        follow_ups.extend(quality_follow_ups)
         follow_ups.append(f"{_screenshot_unavailable_message()} The text entry was still reviewed.")
         if not updates:
             follow_ups.append(
@@ -851,8 +970,13 @@ def _classify_capture_text(
         return enrich_updates_with_leadership_lens(updates), follow_ups, "local_fallback", None
     if image_inputs:
         return [], [_screenshot_unavailable_message()], "image_unavailable", None
-    updates = resolution_updates + _fallback_classify_capture_text(text)
+    updates, quality_follow_ups = _prepare_capture_updates(
+        resolution_updates + _fallback_classify_capture_text(text),
+        text,
+        classification_source="local_fallback",
+    )
     follow_ups = _task_resolution_suggestions(db, text)
+    follow_ups.extend(quality_follow_ups)
     if not updates:
         follow_ups.extend([
         "What person, company, project, decision, or metric should be saved from this update?"
@@ -1008,9 +1132,21 @@ def _apply_approved_updates(
 
     saved_record_ids: list[dict[str, Any]] = []
     approved_payloads: list[dict[str, Any]] = []
+    skipped_payloads: list[dict[str, Any]] = []
     persisted_by_index: dict[int, dict[str, Any]] = {}
     for update_index, raw_update in enumerate(approved_updates):
         update = raw_update.model_dump() if isinstance(raw_update, SuggestedUpdate) else raw_update
+        prepared_update = _prepare_task_update_for_capture(
+            update,
+            text,
+            classification_source=classification_source,
+        )
+        if prepared_update is None:
+            skipped_payload = dict(update)
+            skipped_payload["skip_reason"] = "weak_task_missing_owner_outcome_or_action_context"
+            skipped_payloads.append(skipped_payload)
+            continue
+        update = prepared_update
         update = enrich_task_update_with_leadership_lens(update)
         approved_payloads.append(update)
         update_type = update.get("type")
@@ -1159,7 +1295,7 @@ def _apply_approved_updates(
 
     capture = db.get(CaptureRecord, capture_id) if capture_id else None
     if capture:
-        capture.saved_count = len(approved_updates)
+        capture.saved_count = len(approved_payloads)
         capture.classification_source = classification_source or capture.classification_source
         capture.approved_suggestions = approved_payloads
         proposed_updates = []
@@ -1172,12 +1308,13 @@ def _apply_approved_updates(
         capture.rejected_suggestions = [
             proposed for index, proposed in enumerate(proposed_updates)
             if index not in approved_indexes
-        ]
+        ] + skipped_payloads
         capture.saved_record_ids = saved_record_ids
         events = list(capture.processing_events or [])
         events.append({
             "event": "approved_updates_saved",
-            "saved_count": len(approved_updates),
+            "saved_count": len(approved_payloads),
+            "skipped_count": len(skipped_payloads),
             "at": datetime.now(timezone.utc).isoformat(),
         })
         capture.processing_events = events
@@ -1190,10 +1327,12 @@ def _apply_approved_updates(
             classification_source=classification_source,
             interpretation_payload=interpretation_payload,
             approved_updates=approved_payloads,
+            rejected_updates=skipped_payloads,
             saved_record_ids=saved_record_ids,
             processing_events=[{
                 "event": "approved_updates_saved_without_prior_review_record",
-                "saved_count": len(approved_updates),
+                "saved_count": len(approved_payloads),
+                "skipped_count": len(skipped_payloads),
                 "at": datetime.now(timezone.utc).isoformat(),
             }],
         )

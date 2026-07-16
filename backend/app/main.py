@@ -303,8 +303,8 @@ def confirm_capture(payload: CaptureConfirmationRequest, db: Session = Depends(g
             leadership_error = f"Leadership review could not be generated: {type(error).__name__}"
     return {
         "message": "Approved updates saved",
-        "saved_count": len(payload.approved_updates),
-        "approved_updates": [update.model_dump() for update in payload.approved_updates],
+        "saved_count": capture_record.saved_count if capture_record else len(payload.approved_updates),
+        "approved_updates": capture_record.approved_suggestions if capture_record else [update.model_dump() for update in payload.approved_updates],
         "capture_id": capture_record.id if capture_record else None,
         "saved_record_ids": capture_record.saved_record_ids if capture_record else [],
         "leadership_review": serialize_leadership_review(leadership_review) if leadership_review else None,

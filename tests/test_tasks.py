@@ -159,6 +159,64 @@ def test_capture_confirm_normalizes_ai_proposed_pending_status():
     assert task['status'] == 'waiting'
 
 
+def test_local_fallback_filters_weak_context_tasks(monkeypatch):
+    monkeypatch.setattr('app.capture_service.analyze_capture', lambda text, memory_context: None)
+
+    classified = client.post('/capture/classify', json={
+        'text': 'PEC sales meeting check-in debrief: Ryan, Catalina and I met today to discuss sales activities and outlook. We need to get our year back on track.',
+    })
+
+    assert classified.status_code == 200
+    payload = classified.json()
+    task_titles = [update['title'] for update in payload['suggested_updates'] if update['type'] == 'task']
+    assert 'Discuss sales activities and outlook' not in task_titles
+    assert 'Get our year back on track' not in task_titles
+
+
+def test_capture_confirm_clears_invalid_task_owner_and_reopens_non_resolution_completion():
+    saved = client.post('/capture/confirm', json={
+        'text': 'RYSE leadership notes: This will require Veronica to build a group therapy curriculum.',
+        'classification_source': 'ai',
+        'approved_updates': [{
+            'type': 'task',
+            'title': 'Veronica build a group therapy curriculum',
+            'company': 'RYSE Wellness',
+            'owner': 'This',
+            'status': 'completed',
+            'priority': 'medium',
+            'source_type': 'capture_text',
+            'source_excerpt': 'This will require Veronica to build a group therapy curriculum.',
+        }],
+    })
+
+    assert saved.status_code == 200
+    tasks = client.get('/objects/tasks').json()['items']
+    task = next(item for item in tasks if item['title'] == 'Veronica build a group therapy curriculum')
+    assert task['owner'] == ''
+    assert task['status'] == 'open'
+
+
+def test_capture_confirm_skips_weak_local_fallback_task_from_old_review():
+    saved = client.post('/capture/confirm', json={
+        'text': 'PEC sales meeting check-in debrief: Ryan, Catalina and I met today to discuss sales activities and outlook.',
+        'classification_source': 'local_fallback',
+        'approved_updates': [{
+            'type': 'task',
+            'title': 'Discuss sales activities and outlook',
+            'company': 'PEC',
+            'status': 'open',
+            'priority': 'medium',
+            'source_type': 'capture_text',
+            'source_excerpt': 'Ryan, Catalina and I met today to discuss sales activities and outlook.',
+        }],
+    })
+
+    assert saved.status_code == 200
+    assert saved.json()['saved_count'] == 0
+    tasks = client.get('/objects/tasks').json()['items']
+    assert not any(task['title'] == 'Discuss sales activities and outlook' for task in tasks)
+
+
 def test_meeting_action_items_create_linked_tasks_and_preserve_meeting_actions():
     meeting = client.post('/objects/meetings', json={'attributes': {
         'title': 'PEC client retention review',

@@ -28,6 +28,21 @@ def _openai_image_detail() -> str:
     return detail
 
 
+def _capture_model_candidates() -> list[str]:
+    configured = [
+        os.getenv("OPENAI_CAPTURE_MODEL", ""),
+        os.getenv("OPENAI_MODEL", ""),
+        os.getenv("OPENAI_CAPTURE_FALLBACK_MODEL", ""),
+        "gpt-4.1-mini",
+    ]
+    candidates: list[str] = []
+    for model in configured:
+        model = str(model or "").strip()
+        if model and model not in candidates:
+            candidates.append(model)
+    return candidates
+
+
 class SuggestedUpdate(BaseModel):
     type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric", "task"]
     name: str = ""
@@ -214,25 +229,40 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         for image in image_inputs:
             user_content.append({"type": "input_image", "image_url": image, "detail": image_detail})
 
-        model = os.getenv("OPENAI_MODEL", "gpt-5.6")
-        response = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2).responses.parse(
-            model=model,
-            input=[
-                {"role": "system", "content": f"{SYSTEM_PROMPT}\n{leadership_lens_summary()}\nPrompt version: {CAPTURE_PROMPT_VERSION}"},
-                {
-                    "role": "user",
-                    "content": user_content,
-                },
-            ],
-            text_format=CaptureAnalysis,
-        )
-        return response.output_parsed
+        client = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2)
+        last_error: Exception | None = None
+        for model in _capture_model_candidates():
+            try:
+                response = client.responses.parse(
+                    model=model,
+                    input=[
+                        {"role": "system", "content": f"{SYSTEM_PROMPT}\n{leadership_lens_summary()}\nPrompt version: {CAPTURE_PROMPT_VERSION}"},
+                        {
+                            "role": "user",
+                            "content": user_content,
+                        },
+                    ],
+                    text_format=CaptureAnalysis,
+                )
+                return response.output_parsed
+            except Exception as error:
+                last_error = error
+                logger.warning(
+                    "AI capture classification attempt failed (model=%s, images=%s, error_type=%s, error=%s)",
+                    model,
+                    len(image_data) if isinstance(image_data, list) else int(bool(image_data)),
+                    type(error).__name__,
+                    str(error)[:500],
+                )
+        if last_error:
+            raise last_error
+        return None
     except Exception as error:
         # Capture must remain usable if the provider is unavailable. The exception is
         # logged server-side without exposing credentials or provider details to users.
         logger.warning(
-            "AI capture classification failed; using local fallback (model=%s, images=%s, error_type=%s, error=%s)",
-            os.getenv("OPENAI_MODEL", "gpt-5.6"),
+            "AI capture classification failed across configured models; using local fallback (models=%s, images=%s, error_type=%s, error=%s)",
+            ",".join(_capture_model_candidates()),
             len(image_data) if isinstance(image_data, list) else int(bool(image_data)),
             type(error).__name__,
             str(error)[:500],
