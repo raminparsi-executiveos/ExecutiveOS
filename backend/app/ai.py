@@ -119,6 +119,9 @@ class SuggestedUpdate(BaseModel):
     linked_project_ids: list[int] = Field(default_factory=list)
     linked_decision_ids: list[int] = Field(default_factory=list)
     linked_people: list[str] = Field(default_factory=list)
+    quality_score: int = 0
+    quality_notes: list[str] = Field(default_factory=list)
+    next_best_action: str = ""
 
 
 class CaptureStatement(BaseModel):

@@ -1694,6 +1694,14 @@ function renderPanel() {
             <h3>Suggested updates</h3>
             <span class="badge">${classificationResult.classification_source === 'ai' ? 'AI organized' : 'Local preview'}</span>
           </div>
+          ${classificationResult.next_best_action ? `<div class="follow-ups"><strong>Next best action</strong>${renderList([classificationResult.next_best_action])}</div>` : ''}
+          ${classificationResult.diagnostics ? `
+            <div class="capture-quality">
+              <span><strong>${escapeHtml(classificationResult.diagnostics.average_task_quality || 0)}</strong> task quality</span>
+              <span><strong>${escapeHtml(classificationResult.diagnostics.low_quality_task_count || 0)}</strong> weak tasks</span>
+              ${classificationResult.diagnostics.fallback_reason ? `<span><strong>Fallback</strong> ${escapeHtml(classificationResult.diagnostics.fallback_reason)}</span>` : ''}
+            </div>
+          ` : ''}
           ${classificationResult.suggested_updates.length ? classificationResult.suggested_updates.map((item, index) => `
             <label class="suggestion">
               <input class="approval-toggle" type="checkbox" data-index="${index}" ${selectedUpdateIndices.includes(index) ? 'checked' : ''} />
@@ -1705,6 +1713,8 @@ function renderPanel() {
               ${item.final_decision ? `<small>Decision: ${escapeHtml(item.final_decision)}</small>` : ''}
               ${item.reasoning ? `<small>Reasoning: ${escapeHtml(item.reasoning)}</small>` : ''}
               ${item.risks?.length ? `<small>Risks: ${escapeHtml(item.risks.join(', '))}</small>` : ''}
+              ${item.quality_score ? `<small>Quality score: ${escapeHtml(item.quality_score)}${item.quality_notes?.length ? ` · ${escapeHtml(item.quality_notes.join(', '))}` : ''}</small>` : ''}
+              ${item.next_best_action ? `<small>Next: ${escapeHtml(item.next_best_action)}</small>` : ''}
               ${item.details ? `<small>${escapeHtml(item.details)}</small>` : ''}</span>
             </label>
           `).join('') : '<p class="muted">No reliable structured updates were found. Add a person, company, project, decision, or metric and try again.</p>'}
@@ -1763,6 +1773,14 @@ function renderPanel() {
               <span><strong>${escapeHtml(detail.interpretation.confidence || 'Unknown')}</strong> confidence</span>
               <span><strong>${escapeHtml(detail.interpretation.prompt_version || '')}</strong> prompt</span>
             </div>
+            ${detail.next_best_action ? `<div class="follow-ups"><strong>Next best action</strong>${renderList([detail.next_best_action])}</div>` : ''}
+            ${detail.diagnostics ? `
+              <div class="capture-quality">
+                <span><strong>${escapeHtml(detail.diagnostics.average_task_quality || 0)}</strong> task quality</span>
+                <span><strong>${escapeHtml(detail.diagnostics.low_quality_task_count || 0)}</strong> weak tasks</span>
+                ${detail.diagnostics.fallback_reason ? `<span><strong>Fallback</strong> ${escapeHtml(detail.diagnostics.fallback_reason)}</span>` : ''}
+              </div>
+            ` : ''}
           ` : ''}
           <div class="audit-table" role="table" aria-label="Capture comparison">
             <div class="audit-row audit-header" role="row">

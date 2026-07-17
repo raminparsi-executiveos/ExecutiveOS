@@ -69,6 +69,10 @@ NON_ACTION_CONTEXT_PATTERNS = (
 )
 
 
+def _sentence_list(text: str) -> list[str]:
+    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
+
+
 def _screenshot_unavailable_message() -> str:
     if not os.getenv("OPENAI_API_KEY"):
         return "Screenshot analysis needs OPENAI_API_KEY configured on the backend."
@@ -329,6 +333,39 @@ def _normalize_task_status_for_capture(status: str, text: str) -> str:
     return status or "open"
 
 
+def _task_quality(update: dict[str, Any]) -> tuple[int, list[str]]:
+    if update.get("type") != "task":
+        return 100, []
+    score = 0
+    notes: list[str] = []
+    title = str(update.get("title") or "").strip()
+    if title:
+        score += 20
+    else:
+        notes.append("missing title")
+    if update.get("owner") or update.get("assigned_to") or update.get("waiting_on"):
+        score += 20
+    else:
+        notes.append("missing owner or accountable party")
+    if update.get("next_action"):
+        score += 15
+    else:
+        notes.append("missing next action")
+    if update.get("expected_deliverable") or update.get("definition_of_done"):
+        score += 20
+    else:
+        notes.append("missing expected outcome")
+    if update.get("source_excerpt") or update.get("evidence_excerpt"):
+        score += 15
+    else:
+        notes.append("missing source excerpt")
+    if update.get("due_date") or update.get("follow_up_date") or update.get("recurrence"):
+        score += 10
+    else:
+        notes.append("missing due date or cadence")
+    return min(score, 100), notes
+
+
 def _is_weak_task_update(update: dict[str, Any], *, classification_source: str) -> bool:
     if update.get("type") != "task":
         return False
@@ -365,9 +402,27 @@ def _prepare_task_update_for_capture(
         if field in prepared:
             prepared[field] = _normalize_owner(prepared.get(field) or "")
     prepared["status"] = _normalize_task_status_for_capture(prepared.get("status") or "open", text)
+    score, notes = _task_quality(prepared)
+    prepared["quality_score"] = score
+    prepared["quality_notes"] = notes
+    if not prepared.get("next_best_action"):
+        prepared["next_best_action"] = prepared.get("next_action") or (
+            "Clarify owner, outcome, and review cadence before treating this as an executive commitment."
+            if score < 70 else
+            "Confirm the owner, expected outcome, and review cadence."
+        )
     if _is_weak_task_update(prepared, classification_source=classification_source):
         return None
     return prepared
+
+
+def _weak_task_clarification_prompts(update: dict[str, Any]) -> list[str]:
+    title = str(update.get("title") or "this item").strip()
+    return [
+        f"What business result should '{title}' improve?",
+        f"Who owns '{title}' and by when should it be reviewed?",
+        f"What metric or observable outcome proves '{title}' worked?",
+    ]
 
 
 def _task_update(
@@ -435,7 +490,7 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
         seen_titles.add(normalized)
         updates.append(update)
 
-    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
+    sentences = _sentence_list(text)
     transition_subject = ""
     for sentence in sentences:
         passive_match = re.search(r"\bwill\s+be\s+(?:provided|selected|used|discussed|reviewed|captured)\b", sentence, flags=re.IGNORECASE)
@@ -616,6 +671,71 @@ def _fallback_task_updates(text: str, detected_company: str) -> list[dict[str, A
     return updates
 
 
+def _extract_attendees(text: str) -> list[str]:
+    attendees: list[str] = []
+    met_match = re.search(r"\b([A-Z][A-Za-z]+(?:,\s*[A-Z][A-Za-z]+)*(?:\s+and\s+[A-Z][A-Za-z]+)?)\s+and\s+I\s+met\b", text)
+    if met_match:
+        attendees.extend(re.split(r",\s*|\s+and\s+", met_match.group(1)))
+    people = re.findall(r"\b(?:with|attendees?:)\s+([A-Z][A-Za-z]+(?:,\s*[A-Z][A-Za-z]+)*(?:\s+and\s+[A-Z][A-Za-z]+)?)", text)
+    for group in people:
+        attendees.extend(re.split(r",\s*|\s+and\s+", group))
+    return list(dict.fromkeys(name.strip() for name in attendees if name.strip()))
+
+
+def _fallback_meeting_updates(text: str, detected_company: str) -> list[dict[str, Any]]:
+    lowered = text.lower()
+    if not any(keyword in lowered for keyword in ("meeting", "debrief", "met today", "check-in", "check in")):
+        return []
+    topic = "meeting notes"
+    topic_match = re.search(r"\b(?:to discuss|discussed)\s+([^.!?]+)", text, flags=re.IGNORECASE)
+    if topic_match:
+        topic = topic_match.group(1).strip()
+    title_prefix = detected_company or "Executive"
+    title = f"{title_prefix} {topic}".strip()
+    if any(keyword in lowered for keyword in ("debrief", "check-in", "check in")) and "debrief" not in title.lower():
+        title = f"{title_prefix} sales meeting debrief" if "sales" in lowered else f"{title_prefix} meeting debrief"
+    action_items = [
+        update["title"]
+        for update in _fallback_task_updates(text, detected_company)
+        if update.get("quality_score", 0) >= 60
+    ][:8]
+    open_questions = _vague_strategy_followups(text)[:6]
+    return [{
+        "type": "meeting",
+        "title": _title_from_action(title),
+        "company": detected_company,
+        "summary": text.strip()[:700],
+        "attendees": _extract_attendees(text),
+        "action_items": action_items,
+        "open_questions": open_questions,
+        "details": "Meeting/debrief context captured separately from task commitments.",
+        "memory_classification": "confirmed_fact",
+        "verification_state": "local_fallback_pending_review",
+    }]
+
+
+def _vague_strategy_followups(text: str) -> list[str]:
+    lowered = text.lower()
+    prompts: list[str] = []
+    if re.search(r"\b(?:come up with|need|create|build)\s+(?:a\s+)?(?:new\s+)?strategy\b", lowered):
+        prompts.extend([
+            "What business result should the strategy improve?",
+            "Who owns drafting the strategy, and when should it be reviewed?",
+            "What metric defines whether the strategy worked?",
+        ])
+    if "sales activities and outlook" in lowered:
+        prompts.extend([
+            "What specific sales activity target should Ryan and Catalina be accountable for?",
+            "What pipeline or closed-revenue metric should be reviewed at the next sales check-in?",
+        ])
+    if "get our year back on track" in lowered or "get us to our numbers" in lowered:
+        prompts.extend([
+            "What number needs to be recovered, and by what date?",
+            "Which owner is accountable for the recovery plan?",
+        ])
+    return list(dict.fromkeys(prompts))
+
+
 def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
     lowered = text.lower()
     updates: list[dict[str, Any]] = []
@@ -683,6 +803,7 @@ def _fallback_classify_capture_text(text: str) -> list[dict[str, Any]]:
             "details": "Potential metric update.",
         })
 
+    updates.extend(_fallback_meeting_updates(text, detected_company))
     updates.extend(_fallback_task_updates(text, detected_company))
 
     if detected_name:
@@ -726,18 +847,52 @@ def _prepare_capture_updates(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     prepared_updates: list[dict[str, Any]] = []
     follow_ups: list[str] = []
+    clarification_prompts: list[str] = []
     skipped_task_count = 0
     for update in updates:
         prepared = _prepare_task_update_for_capture(update, text, classification_source=classification_source)
         if prepared is None:
             skipped_task_count += 1
+            clarification_prompts.extend(_weak_task_clarification_prompts(update))
             continue
         prepared_updates.append(prepared)
     if skipped_task_count:
         follow_ups.append(
             f"{skipped_task_count} weak task suggestion{'s were' if skipped_task_count != 1 else ' was'} held back because the capture did not include enough owner, outcome, or action context."
         )
+    follow_ups.extend(clarification_prompts)
     return prepared_updates, follow_ups
+
+
+def _capture_next_best_action(updates: list[dict[str, Any]], follow_ups: list[str], text: str) -> str:
+    task_updates = [update for update in updates if update.get("type") == "task"]
+    if follow_ups:
+        return follow_ups[0]
+    if task_updates:
+        weakest = min(task_updates, key=lambda update: int(update.get("quality_score") or 0))
+        if int(weakest.get("quality_score") or 0) < 80:
+            return weakest.get("next_best_action") or "Clarify owner, expected outcome, and review cadence."
+        return task_updates[0].get("next_action") or "Confirm the highest-impact task owner and next review date."
+    if any(keyword in text.lower() for keyword in ("meeting", "debrief", "met today", "check-in", "check in")):
+        return "Review the meeting context and convert only concrete commitments into tracked tasks."
+    return "Clarify the concrete memory update or decision this capture should save."
+
+
+def _capture_diagnostics(classification_source: str, image_count: int, updates: list[dict[str, Any]]) -> dict[str, Any]:
+    task_updates = [update for update in updates if update.get("type") == "task"]
+    return {
+        "classification_source": classification_source,
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "openai_model": os.getenv("OPENAI_MODEL", ""),
+        "image_count": image_count,
+        "task_count": len(task_updates),
+        "low_quality_task_count": sum(1 for update in task_updates if int(update.get("quality_score") or 0) < 70),
+        "average_task_quality": round(
+            sum(int(update.get("quality_score") or 0) for update in task_updates) / len(task_updates),
+            1,
+        ) if task_updates else 0,
+        "fallback_reason": "AI unavailable, timed out, or returned unusable output" if classification_source in {"local_fallback", "image_unavailable"} else "",
+    }
 
 
 def _memory_context(db: Session) -> str:
@@ -761,9 +916,24 @@ def _memory_context(db: Session) -> str:
     return f"Companies: {companies}\nPeople: {people}\nStrategic issues: {issues}\nProjects: {projects}\nOpen tasks: {tasks}"
 
 
-def _analysis_to_interpretation(analysis: CaptureAnalysis | None, text: str, updates: list[dict[str, Any]], follow_ups: list[str]) -> dict[str, Any]:
+def _analysis_to_interpretation(
+    analysis: CaptureAnalysis | None,
+    text: str,
+    updates: list[dict[str, Any]],
+    follow_ups: list[str],
+    *,
+    classification_source: str = "unknown",
+    image_count: int = 0,
+) -> dict[str, Any]:
+    diagnostics = _capture_diagnostics(classification_source, image_count, updates)
+    next_best_action = _capture_next_best_action(updates, follow_ups, text)
     if analysis:
-        return analysis.model_dump()
+        payload = analysis.model_dump()
+        payload["suggested_updates"] = updates
+        payload["follow_ups"] = follow_ups
+        payload["diagnostics"] = diagnostics
+        payload["next_best_action"] = next_best_action
+        return payload
     summary = text.strip()[:300] or "Screenshot capture could not be interpreted by AI."
     return {
         "capture_summary": summary,
@@ -791,6 +961,8 @@ def _analysis_to_interpretation(analysis: CaptureAnalysis | None, text: str, upd
         "source_evidence": [{"type": "typed_text", "excerpt": text.strip()[:500]}] if text.strip() else [],
         "suggested_updates": updates,
         "follow_ups": follow_ups,
+        "diagnostics": diagnostics,
+        "next_best_action": next_best_action,
     }
 
 
@@ -896,7 +1068,7 @@ def _mutation_from_update(
         proposed_values=update,
         approved_values={},
         persisted_values={},
-        missing_material_fields=update.get("missing_material_fields") or [],
+        missing_material_fields=list(dict.fromkeys((update.get("missing_material_fields") or []) + (update.get("quality_notes") or []))),
         uncertainty=update.get("uncertainty") or "",
         explanation=update.get("explanation") or update.get("details") or "",
         user_edits=[],
@@ -917,7 +1089,20 @@ def create_capture_review(
     *,
     processing_events: list[dict[str, Any]] | None = None,
 ) -> tuple[CaptureRecord, CaptureInterpretation, list[CaptureMutation]]:
-    interpretation_payload = _analysis_to_interpretation(analysis, text, suggested_updates, follow_ups)
+    image_count = 0
+    if processing_events:
+        image_count = max(
+            [int(event.get("image_count") or 0) for event in processing_events if isinstance(event, dict) and "image_count" in event]
+            or [0]
+        )
+    interpretation_payload = _analysis_to_interpretation(
+        analysis,
+        text,
+        suggested_updates,
+        follow_ups,
+        classification_source=classification_source,
+        image_count=image_count,
+    )
     capture = _create_capture_record(
         db,
         text,
@@ -950,7 +1135,7 @@ def _classify_capture_text(
         )
         return (
             enrich_updates_with_leadership_lens(prepared_updates),
-            analysis.follow_ups + quality_follow_ups,
+            list(dict.fromkeys(analysis.follow_ups + quality_follow_ups)),
             "ai",
             analysis,
         )
@@ -962,12 +1147,13 @@ def _classify_capture_text(
         )
         follow_ups = _task_resolution_suggestions(db, text)
         follow_ups.extend(quality_follow_ups)
+        follow_ups.extend(_vague_strategy_followups(text))
         follow_ups.append(f"{_screenshot_unavailable_message()} The text entry was still reviewed.")
         if not updates:
             follow_ups.append(
                 "What person, company, project, decision, or metric should be saved from this update?"
             )
-        return enrich_updates_with_leadership_lens(updates), follow_ups, "local_fallback", None
+        return enrich_updates_with_leadership_lens(updates), list(dict.fromkeys(follow_ups)), "local_fallback", None
     if image_inputs:
         return [], [_screenshot_unavailable_message()], "image_unavailable", None
     updates, quality_follow_ups = _prepare_capture_updates(
@@ -977,11 +1163,12 @@ def _classify_capture_text(
     )
     follow_ups = _task_resolution_suggestions(db, text)
     follow_ups.extend(quality_follow_ups)
+    follow_ups.extend(_vague_strategy_followups(text))
     if not updates:
         follow_ups.extend([
         "What person, company, project, decision, or metric should be saved from this update?"
         ])
-    return enrich_updates_with_leadership_lens(updates), follow_ups, "local_fallback", None
+    return enrich_updates_with_leadership_lens(updates), list(dict.fromkeys(follow_ups)), "local_fallback", None
 
 
 def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:

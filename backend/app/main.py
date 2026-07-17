@@ -275,6 +275,8 @@ def classify_capture(payload: CaptureClassificationRequest, db: Session = Depend
         "interpretation_id": interpretation.id,
         "mutation_ids": [mutation.id for mutation in mutations],
         "capture_interpretation": interpretation.raw_response,
+        "diagnostics": (interpretation.raw_response or {}).get("diagnostics", {}),
+        "next_best_action": (interpretation.raw_response or {}).get("next_best_action", ""),
     }
 
 
@@ -1221,6 +1223,8 @@ def capture_audit_package(
         "interpretation": _serialize_model(interpretation) if interpretation else None,
         "mutations": [_serialize_model(mutation) for mutation in mutations],
         "comparison": comparison_rows,
+        "diagnostics": (interpretation.raw_response or {}).get("diagnostics", {}) if interpretation else {},
+        "next_best_action": (interpretation.raw_response or {}).get("next_best_action", "") if interpretation else "",
         "available_actions": [
             {"key": "review_again", "label": "Review again in Capture"},
             {"key": "create_tasks", "label": "Create tasks from capture"},

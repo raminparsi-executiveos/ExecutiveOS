@@ -37,6 +37,58 @@ def test_capture_classification_persists_interpretation_and_mutations(monkeypatc
         db.close()
 
 
+def test_local_fallback_turns_sales_debrief_into_meeting_and_clarifications(monkeypatch):
+    monkeypatch.setattr("app.capture_service.analyze_capture", lambda text, memory_context: None)
+    capture = (
+        "PEC sales meeting check-in debrief: Ryan, Catalina and I met today (07.16.2026) "
+        "to discuss sales activities and outlook. I mentioned to the team that we need to focus "
+        "on existing clients and come up with new strategy to get our year back on track."
+    )
+
+    classified = client.post("/capture/classify", json={"text": capture})
+
+    assert classified.status_code == 200
+    payload = classified.json()
+    updates = payload["suggested_updates"]
+    meeting = next(update for update in updates if update["type"] == "meeting")
+    assert meeting["title"] == "PEC sales meeting debrief"
+    assert set(meeting["attendees"]) >= {"Ryan", "Catalina"}
+    assert any("business result" in follow_up for follow_up in payload["follow_ups"])
+    assert any("sales activity target" in follow_up for follow_up in payload["follow_ups"])
+    assert payload["diagnostics"]["classification_source"] == "local_fallback"
+    assert payload["next_best_action"]
+    task_titles = [update["title"] for update in updates if update["type"] == "task"]
+    assert "Discuss sales activities and outlook" not in task_titles
+    assert "Come up with new strategy" not in task_titles
+
+
+def test_capture_task_quality_metadata_reaches_audit(monkeypatch):
+    monkeypatch.setattr("app.capture_service.analyze_capture", lambda text, memory_context: None)
+    classified = client.post("/capture/classify", json={
+        "text": "Kyle will send the revised client-retention plan by Friday.",
+    })
+    assert classified.status_code == 200
+    update = next(update for update in classified.json()["suggested_updates"] if update["type"] == "task")
+    assert update["quality_score"] >= 70
+    assert update["next_best_action"]
+
+    saved = client.post("/capture/confirm", json={
+        "capture_id": classified.json()["capture_id"],
+        "text": "Kyle will send the revised client-retention plan by Friday.",
+        "classification_source": "local_fallback",
+        "approved_updates": [update],
+    })
+    assert saved.status_code == 200
+
+    audit = client.get(f"/captures/{saved.json()['capture_id']}/audit")
+    assert audit.status_code == 200
+    payload = audit.json()
+    assert payload["diagnostics"]["average_task_quality"] >= 70
+    assert payload["next_best_action"]
+    approved_row = next(row for row in payload["comparison"] if row["approved_mutation"])
+    assert approved_row["approved_mutation"]["quality_score"] >= 70
+
+
 def test_capture_confirm_links_approved_mutation_to_persisted_task():
     classified = client.post("/capture/classify", json={
         "text": "Kyle should review Julio's work on critical projects before anything is sent to the client.",
