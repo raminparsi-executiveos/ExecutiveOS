@@ -144,3 +144,22 @@ def test_parse_capture_analysis_json_coerces_human_readable_ids():
     assert update.parent_task_id == 17
     assert update.linked_project_ids == [8, 9]
     assert update.linked_decision_ids == [3]
+
+
+def test_parse_capture_analysis_json_coerces_structured_followups():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [],
+      "follow_ups": [
+        {"question": "Who is the accountable owner?", "why": "Clarify the owner clearly."},
+        {"question": "What is the target date?", "reason": "No milestone is provided."}
+      ],
+      "open_questions": [{"question": "Which company owns this?"}],
+      "ambiguities": [{"ambiguity": "Owner unclear"}]
+    }''')
+
+    assert analysis.follow_ups == [
+        "Who is the accountable owner? (Clarify the owner clearly.)",
+        "What is the target date? (No milestone is provided.)",
+    ]
+    assert analysis.open_questions == ["Which company owns this?"]
+    assert analysis.ambiguities == ["Owner unclear"]

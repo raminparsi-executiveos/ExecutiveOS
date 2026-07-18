@@ -171,6 +171,33 @@ def _coerce_int_list(value: Any) -> list[int]:
     return ids
 
 
+def _coerce_text_list(value: Any) -> list[str]:
+    output: list[str] = []
+    for item in _as_list(value):
+        if item in (None, "", []):
+            continue
+        if isinstance(item, dict):
+            text = (
+                item.get("question")
+                or item.get("text")
+                or item.get("title")
+                or item.get("summary")
+                or item.get("description")
+                or item.get("ambiguity")
+                or item.get("follow_up")
+                or _compact_json_value(item)
+            )
+            why = item.get("why") or item.get("why_it_matters") or item.get("reason")
+            if why and text and str(why) not in str(text):
+                text = f"{text} ({why})"
+        else:
+            text = item
+        text = str(text or "").strip()
+        if text and text not in output:
+            output.append(text)
+    return output
+
+
 def _compact_json_value(value: Any) -> str:
     if value in (None, "", []):
         return ""
@@ -248,7 +275,10 @@ def _normalize_capture_analysis_payload(payload: dict[str, Any]) -> dict[str, An
         _normalize_suggested_update_payload(update)
         for update in _as_list(updates)
     ]
-    for field in ("follow_ups", "people_roles", "statements", "open_questions", "ambiguities", "source_evidence"):
+    for field in ("follow_ups", "open_questions", "ambiguities"):
+        if field in normalized:
+            normalized[field] = _coerce_text_list(normalized[field])
+    for field in ("people_roles", "statements", "source_evidence"):
         if field in normalized:
             normalized[field] = _as_list(normalized[field])
     return normalized
