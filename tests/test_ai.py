@@ -91,3 +91,37 @@ def test_parse_capture_analysis_json_wraps_update_list():
 
     assert len(analysis.suggested_updates) == 1
     assert analysis.suggested_updates[0].title == 'Review pricing'
+
+
+def test_parse_capture_analysis_json_flattens_nested_details_object():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [{
+        "type": "task",
+        "details": {
+          "title": "Ryan to focus outreach",
+          "owner": "Ryan Labus",
+          "next_action": "Confirm sales team focus this week"
+        }
+      }]
+    }''')
+
+    update = analysis.suggested_updates[0]
+    assert update.title == 'Ryan to focus outreach'
+    assert update.owner == 'Ryan Labus'
+    assert update.next_action == 'Confirm sales team focus this week'
+    assert isinstance(update.details, str)
+
+
+def test_parse_capture_analysis_json_infers_missing_update_type():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [{
+        "operation": "create",
+        "title": "Daily outreach cadence",
+        "owner": "Ryan",
+        "status": "open",
+        "field_operations": {"status": "replace"}
+      }]
+    }''')
+
+    assert analysis.suggested_updates[0].type == 'task'
+    assert analysis.suggested_updates[0].title == 'Daily outreach cadence'

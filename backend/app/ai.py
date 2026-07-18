@@ -2,7 +2,7 @@ import logging
 import json
 import os
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,6 +62,173 @@ def _strict_json_schema(schema: dict[str, object], _model: type[BaseModel]) -> N
     schema["additionalProperties"] = False
 
 
+SUGGESTED_UPDATE_TYPES = {
+    "person",
+    "company",
+    "strategic_issue",
+    "project",
+    "decision",
+    "meeting",
+    "sop",
+    "document",
+    "metric",
+    "task",
+}
+SUGGESTED_UPDATE_STRING_FIELDS = {
+    "name",
+    "title",
+    "company",
+    "description",
+    "details",
+    "role",
+    "owner",
+    "status",
+    "current_thinking",
+    "objective",
+    "context",
+    "final_decision",
+    "reasoning",
+    "expected_outcome",
+    "review_date",
+    "summary",
+    "purpose",
+    "current_process",
+    "source",
+    "value",
+    "date",
+    "trend",
+    "notes",
+    "related_strategic_issue",
+    "due_date",
+    "priority",
+    "source_type",
+    "source_id",
+    "source_summary",
+    "next_action",
+    "blocked_by",
+    "memory_classification",
+    "verification_state",
+    "operation",
+    "match_confidence",
+    "evidence_excerpt",
+    "uncertainty",
+    "explanation",
+    "expected_deliverable",
+    "definition_of_done",
+    "why_it_matters",
+    "delegated_by",
+    "assigned_to",
+    "waiting_on",
+    "follow_up_date",
+    "recurrence",
+    "task_type",
+    "confidence",
+    "interpretation_notes",
+    "source_excerpt",
+    "next_best_action",
+}
+SUGGESTED_UPDATE_LIST_FIELDS = {
+    "responsibilities",
+    "strengths",
+    "concerns",
+    "current_priorities",
+    "performance_notes",
+    "milestones",
+    "risks",
+    "next_steps",
+    "options_considered",
+    "attendees",
+    "decisions_made",
+    "action_items",
+    "open_questions",
+    "escalation_rules",
+    "tags",
+    "missing_material_fields",
+    "stakeholders",
+    "dependencies",
+    "linked_project_ids",
+    "linked_decision_ids",
+    "linked_people",
+    "quality_notes",
+}
+
+
+def _compact_json_value(value: Any) -> str:
+    if value in (None, "", []):
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value in (None, ""):
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _infer_suggested_update_type(update: dict[str, Any]) -> str:
+    update_type = str(update.get("type") or "").strip().lower()
+    if update_type in SUGGESTED_UPDATE_TYPES:
+        return update_type
+    if update.get("attendees") or update.get("action_items") or update.get("open_questions"):
+        return "meeting"
+    if update.get("final_decision") or update.get("options_considered") or update.get("review_date"):
+        return "decision"
+    if update.get("value") or update.get("trend") or update.get("related_strategic_issue"):
+        return "metric"
+    if update.get("objective") or update.get("milestones"):
+        return "project"
+    if update.get("current_thinking") or update.get("risks"):
+        return "strategic_issue"
+    if update.get("role") or update.get("responsibilities") or (update.get("name") and not update.get("title")):
+        return "person"
+    return "task"
+
+
+def _normalize_suggested_update_payload(raw_update: Any) -> dict[str, Any]:
+    if not isinstance(raw_update, dict):
+        return {"type": "task", "title": str(raw_update or ""), "details": str(raw_update or "")}
+    update = dict(raw_update)
+    nested_details = update.get("details")
+    if isinstance(nested_details, dict):
+        for key, value in nested_details.items():
+            if key not in update or update.get(key) in (None, "", []):
+                update[key] = value
+        update["details"] = (
+            nested_details.get("details")
+            or nested_details.get("summary")
+            or nested_details.get("description")
+            or nested_details.get("title")
+            or _compact_json_value(nested_details)
+        )
+    update["type"] = _infer_suggested_update_type(update)
+    for field in SUGGESTED_UPDATE_STRING_FIELDS:
+        if field in update and not isinstance(update[field], str) and update[field] is not None:
+            update[field] = _compact_json_value(update[field])
+    for field in SUGGESTED_UPDATE_LIST_FIELDS:
+        if field in update:
+            update[field] = _as_list(update[field])
+    if not update.get("title") and update["type"] != "person" and update.get("name"):
+        update["title"] = update["name"]
+    if not update.get("name") and update["type"] in {"person", "company"} and update.get("title"):
+        update["name"] = update["title"]
+    return update
+
+
+def _normalize_capture_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    updates = normalized.get("suggested_updates") or normalized.get("updates") or normalized.get("items") or []
+    normalized["suggested_updates"] = [
+        _normalize_suggested_update_payload(update)
+        for update in _as_list(updates)
+    ]
+    for field in ("follow_ups", "people_roles", "statements", "open_questions", "ambiguities", "source_evidence"):
+        if field in normalized:
+            normalized[field] = _as_list(normalized[field])
+    return normalized
+
+
 def _parse_capture_analysis_json(raw_text: str) -> "CaptureAnalysis":
     text = raw_text.strip()
     fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
@@ -73,7 +240,7 @@ def _parse_capture_analysis_json(raw_text: str) -> "CaptureAnalysis":
     if not isinstance(payload, dict):
         raise ValueError("Capture analysis JSON must be an object.")
     payload.setdefault("suggested_updates", [])
-    return CaptureAnalysis.model_validate(payload)
+    return CaptureAnalysis.model_validate(_normalize_capture_analysis_payload(payload))
 
 
 class SuggestedUpdate(BaseModel):
