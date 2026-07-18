@@ -14,7 +14,9 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
-        value: gpt-5.6
+        value: gpt-4.1-mini
+      - key: OPENAI_CAPTURE_FALLBACK_MODEL
+        value: gpt-4.1-mini
       - key: OPENAI_IMAGE_DETAIL
         value: high
       - key: OPENAI_TIMEOUT_SECONDS

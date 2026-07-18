@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .auth import auth_configuration_checks, auth_configured, auth_required, authenticate, require_auth
+from .ai import _capture_model_candidates, last_capture_ai_failure
 from .backup_service import export_backup, import_backup
 from .database import Base, engine, get_db
 from .linking_service import related_records
@@ -202,6 +203,10 @@ def authentication_status():
         "ai": {
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
             "model": os.getenv("OPENAI_MODEL", "gpt-5.6"),
+            "capture_model": os.getenv("OPENAI_CAPTURE_MODEL", ""),
+            "capture_fallback_model": os.getenv("OPENAI_CAPTURE_FALLBACK_MODEL", ""),
+            "capture_model_candidates": _capture_model_candidates(),
+            "last_capture_failure": last_capture_ai_failure(),
             "image_detail": os.getenv("OPENAI_IMAGE_DETAIL", "high"),
             "timeout_seconds": os.getenv("OPENAI_TIMEOUT_SECONDS", "60"),
         },

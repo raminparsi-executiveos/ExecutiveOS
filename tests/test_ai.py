@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
-from app.ai import _capture_model_candidates, _openai_image_detail, _openai_timeout_seconds
+from app.ai import _capture_model_candidates, _openai_image_detail, _openai_timeout_seconds, analyze_capture, last_capture_ai_failure
 
 
 def test_openai_timeout_seconds_defaults_and_clamps(monkeypatch):
@@ -43,3 +43,13 @@ def test_capture_model_candidates_try_configured_capture_model_then_fallback(mon
 
     assert candidates[:3] == ['gpt-capture', 'gpt-primary', 'gpt-fallback']
     assert 'gpt-4.1-mini' in candidates
+
+
+def test_analyze_capture_records_missing_key_failure(monkeypatch):
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+
+    assert analyze_capture('Kyle will send the update.', '') is None
+
+    failure = last_capture_ai_failure()
+    assert failure['reason'] == 'missing_openai_api_key'
+    assert failure['attempted_models'] == []

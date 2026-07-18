@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .ai import CAPTURE_PROMPT_VERSION, CaptureAnalysis, SuggestedUpdate, analyze_capture
+from .ai import CAPTURE_PROMPT_VERSION, CaptureAnalysis, SuggestedUpdate, analyze_capture, last_capture_ai_failure
 from .memory import (
     _company_is_explicitly_negated,
     _detect_positive_company,
@@ -880,10 +880,13 @@ def _capture_next_best_action(updates: list[dict[str, Any]], follow_ups: list[st
 
 def _capture_diagnostics(classification_source: str, image_count: int, updates: list[dict[str, Any]]) -> dict[str, Any]:
     task_updates = [update for update in updates if update.get("type") == "task"]
+    ai_failure = last_capture_ai_failure() if classification_source in {"local_fallback", "image_unavailable"} else {}
     return {
         "classification_source": classification_source,
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
         "openai_model": os.getenv("OPENAI_MODEL", ""),
+        "openai_capture_model": os.getenv("OPENAI_CAPTURE_MODEL", ""),
+        "openai_capture_fallback_model": os.getenv("OPENAI_CAPTURE_FALLBACK_MODEL", ""),
         "image_count": image_count,
         "task_count": len(task_updates),
         "low_quality_task_count": sum(1 for update in task_updates if int(update.get("quality_score") or 0) < 70),
@@ -892,6 +895,7 @@ def _capture_diagnostics(classification_source: str, image_count: int, updates: 
             1,
         ) if task_updates else 0,
         "fallback_reason": "AI unavailable, timed out, or returned unusable output" if classification_source in {"local_fallback", "image_unavailable"} else "",
+        "ai_failure": ai_failure,
     }
 
 

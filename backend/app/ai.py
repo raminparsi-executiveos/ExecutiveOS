@@ -8,6 +8,16 @@ from .leadership_lens import leadership_lens_summary
 
 logger = logging.getLogger(__name__)
 CAPTURE_PROMPT_VERSION = "capture-fidelity-v1"
+_LAST_CAPTURE_AI_FAILURE: dict[str, object] = {}
+
+
+def _set_last_capture_ai_failure(**values: object) -> None:
+    _LAST_CAPTURE_AI_FAILURE.clear()
+    _LAST_CAPTURE_AI_FAILURE.update(values)
+
+
+def last_capture_ai_failure() -> dict[str, object]:
+    return dict(_LAST_CAPTURE_AI_FAILURE)
 
 
 def _openai_timeout_seconds() -> float:
@@ -217,6 +227,12 @@ fields because details may be used only as supporting context.
 def analyze_capture(text: str, memory_context: str, image_data: str | list[str] = "") -> CaptureAnalysis | None:
     """Return structured AI extraction, or None when AI is not configured/available."""
     if not os.getenv("OPENAI_API_KEY"):
+        _set_last_capture_ai_failure(
+            reason="missing_openai_api_key",
+            attempted_models=[],
+            last_error_type="",
+            last_error="OPENAI_API_KEY is not configured.",
+        )
         return None
 
     try:
@@ -234,7 +250,9 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
 
         client = OpenAI(timeout=_openai_timeout_seconds(), max_retries=2)
         last_error: Exception | None = None
+        attempted_models: list[str] = []
         for model in _capture_model_candidates():
+            attempted_models.append(model)
             try:
                 response = client.responses.parse(
                     model=model,
@@ -246,6 +264,13 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
                         },
                     ],
                     text_format=CaptureAnalysis,
+                )
+                _set_last_capture_ai_failure(
+                    reason="",
+                    attempted_models=attempted_models,
+                    last_successful_model=model,
+                    last_error_type="",
+                    last_error="",
                 )
                 return response.output_parsed
             except Exception as error:
@@ -269,5 +294,11 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
             len(image_data) if isinstance(image_data, list) else int(bool(image_data)),
             type(error).__name__,
             str(error)[:500],
+        )
+        _set_last_capture_ai_failure(
+            reason="openai_call_failed",
+            attempted_models=_capture_model_candidates(),
+            last_error_type=type(error).__name__,
+            last_error=str(error)[:500],
         )
         return None
