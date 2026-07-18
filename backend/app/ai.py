@@ -198,6 +198,38 @@ def _coerce_text_list(value: Any) -> list[str]:
     return output
 
 
+def _normalize_field_operations(value: Any) -> dict[str, str]:
+    if value in (None, "", []):
+        return {}
+    if isinstance(value, list):
+        if all(isinstance(item, str) for item in value):
+            return {str(item): "replace" for item in value if str(item).strip()}
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    known_operations = {"append", "replace", "remove", "clear", "resolve", "supersede", "no_change", "add", "create"}
+    operation_aliases = {"add": "append", "create": "replace"}
+    for key, raw in value.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        if key_text in known_operations and isinstance(raw, list):
+            operation = operation_aliases.get(key_text, key_text)
+            for field in raw:
+                field_text = str(field or "").strip()
+                if field_text:
+                    normalized[field_text] = operation
+            continue
+        if isinstance(raw, list):
+            normalized[key_text] = operation_aliases.get(key_text, "replace") if key_text in known_operations else "replace"
+            continue
+        operation = str(raw or "").strip()
+        if operation:
+            normalized[key_text] = operation_aliases.get(operation, operation)
+    return normalized
+
+
 def _compact_json_value(value: Any) -> str:
     if value in (None, "", []):
         return ""
@@ -248,6 +280,8 @@ def _normalize_suggested_update_payload(raw_update: Any) -> dict[str, Any]:
             or _compact_json_value(nested_details)
         )
     update["type"] = _infer_suggested_update_type(update)
+    if "field_operations" in update:
+        update["field_operations"] = _normalize_field_operations(update["field_operations"])
     for field in SUGGESTED_UPDATE_STRING_FIELDS:
         if field in update and not isinstance(update[field], str) and update[field] is not None:
             update[field] = _compact_json_value(update[field])

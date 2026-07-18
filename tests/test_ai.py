@@ -163,3 +163,36 @@ def test_parse_capture_analysis_json_coerces_structured_followups():
     ]
     assert analysis.open_questions == ["Which company owns this?"]
     assert analysis.ambiguities == ["Owner unclear"]
+
+
+def test_parse_capture_analysis_json_normalizes_grouped_field_operations():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [{
+        "type": "task",
+        "title": "Review sales focus",
+        "field_operations": {
+          "append": ["title", "owner"],
+          "add": ["tasks"],
+          "status": "replace"
+        }
+      }]
+    }''')
+
+    assert analysis.suggested_updates[0].field_operations == {
+        "title": "append",
+        "owner": "append",
+        "tasks": "append",
+        "status": "replace",
+    }
+
+
+def test_parse_capture_analysis_json_normalizes_field_operations_list():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [{
+        "type": "task",
+        "title": "Create cleanup plan",
+        "field_operations": ["create"]
+      }]
+    }''')
+
+    assert analysis.suggested_updates[0].field_operations == {"create": "replace"}
