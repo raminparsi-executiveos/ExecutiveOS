@@ -1,11 +1,22 @@
 from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
+from app.capture_service import _capture_fallback_reason
 from app.main import app
 from app.models import CaptureInterpretation, CaptureMutation, CaptureRecord, Task
 
 
 client = TestClient(app)
+
+
+def test_capture_fallback_reason_includes_provider_error():
+    reason = _capture_fallback_reason(
+        "local_fallback",
+        {"last_error_type": "BadRequestError", "last_error": "Invalid schema"},
+    )
+
+    assert "BadRequestError" in reason
+    assert "Invalid schema" in reason
 
 
 def test_capture_classification_persists_interpretation_and_mutations(monkeypatch):

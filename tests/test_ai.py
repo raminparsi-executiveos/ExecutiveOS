@@ -3,7 +3,15 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
-from app.ai import CaptureAnalysis, _capture_model_candidates, _openai_image_detail, _openai_timeout_seconds, analyze_capture, last_capture_ai_failure
+from app.ai import (
+    CaptureAnalysis,
+    _capture_model_candidates,
+    _openai_image_detail,
+    _openai_timeout_seconds,
+    _parse_capture_analysis_json,
+    analyze_capture,
+    last_capture_ai_failure,
+)
 
 
 def test_openai_timeout_seconds_defaults_and_clamps(monkeypatch):
@@ -63,3 +71,23 @@ def test_capture_analysis_schema_is_strict_for_openai_response_format():
             continue
         assert set(definition.get('required', [])) == properties
         assert definition.get('additionalProperties') is False
+
+
+def test_parse_capture_analysis_json_accepts_json_object():
+    analysis = _parse_capture_analysis_json('{"capture_summary":"Reviewed sales plan","suggested_updates":[]}')
+
+    assert analysis.capture_summary == 'Reviewed sales plan'
+    assert analysis.suggested_updates == []
+
+
+def test_parse_capture_analysis_json_accepts_fenced_json():
+    analysis = _parse_capture_analysis_json('```json\n{"suggested_updates":[],"follow_ups":["Who owns this?"]}\n```')
+
+    assert analysis.follow_ups == ['Who owns this?']
+
+
+def test_parse_capture_analysis_json_wraps_update_list():
+    analysis = _parse_capture_analysis_json('[{"type":"task","title":"Review pricing"}]')
+
+    assert len(analysis.suggested_updates) == 1
+    assert analysis.suggested_updates[0].title == 'Review pricing'

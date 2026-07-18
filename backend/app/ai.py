@@ -1,5 +1,7 @@
 import logging
+import json
 import os
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,6 +60,20 @@ def _strict_json_schema(schema: dict[str, object], _model: type[BaseModel]) -> N
     if isinstance(properties, dict):
         schema["required"] = list(properties.keys())
     schema["additionalProperties"] = False
+
+
+def _parse_capture_analysis_json(raw_text: str) -> "CaptureAnalysis":
+    text = raw_text.strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    payload = json.loads(text)
+    if isinstance(payload, list):
+        payload = {"suggested_updates": payload}
+    if not isinstance(payload, dict):
+        raise ValueError("Capture analysis JSON must be an object.")
+    payload.setdefault("suggested_updates", [])
+    return CaptureAnalysis.model_validate(payload)
 
 
 class SuggestedUpdate(BaseModel):
@@ -196,6 +212,9 @@ metric, task. Create task suggestions for commitments, owners, blockers, and act
 items. Preserve decision context, reasoning, tradeoffs, expected outcomes, and review
 dates when present. Use ISO dates when the date is explicit. Do not create raw notes.
 Put useful missing-context questions in follow_ups. Never invent facts.
+Return only valid JSON. The JSON must be an object compatible with the CaptureAnalysis
+shape, with suggested_updates as an array. Use empty strings or empty arrays when a
+field is unknown.
 First preserve the user's intent in the capture interpretation fields. Separate facts,
 observations, concerns, decisions, directives, commitments, proposals, recommendations,
 assumptions, questions, and unverified information. Never silently convert a proposal,
@@ -267,7 +286,7 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
         for model in _capture_model_candidates():
             attempted_models.append(model)
             try:
-                response = client.responses.parse(
+                response = client.responses.create(
                     model=model,
                     input=[
                         {"role": "system", "content": f"{SYSTEM_PROMPT}\n{leadership_lens_summary()}\nPrompt version: {CAPTURE_PROMPT_VERSION}"},
@@ -276,8 +295,9 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
                             "content": user_content,
                         },
                     ],
-                    text_format=CaptureAnalysis,
+                    text={"format": {"type": "json_object"}},
                 )
+                parsed = _parse_capture_analysis_json(response.output_text)
                 _set_last_capture_ai_failure(
                     reason="",
                     attempted_models=attempted_models,
@@ -285,7 +305,7 @@ def analyze_capture(text: str, memory_context: str, image_data: str | list[str] 
                     last_error_type="",
                     last_error="",
                 )
-                return response.output_parsed
+                return parsed
             except Exception as error:
                 last_error = error
                 logger.warning(

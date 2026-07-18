@@ -878,6 +878,21 @@ def _capture_next_best_action(updates: list[dict[str, Any]], follow_ups: list[st
     return "Clarify the concrete memory update or decision this capture should save."
 
 
+def _capture_fallback_reason(classification_source: str, ai_failure: dict[str, Any]) -> str:
+    if classification_source not in {"local_fallback", "image_unavailable"}:
+        return ""
+    reason = "AI unavailable, timed out, or returned unusable output"
+    error_type = str(ai_failure.get("last_error_type") or "").strip()
+    error = str(ai_failure.get("last_error") or "").strip()
+    if error_type and error:
+        return f"{reason}: {error_type}: {error}"
+    if error_type:
+        return f"{reason}: {error_type}"
+    if error:
+        return f"{reason}: {error}"
+    return reason
+
+
 def _capture_diagnostics(classification_source: str, image_count: int, updates: list[dict[str, Any]]) -> dict[str, Any]:
     task_updates = [update for update in updates if update.get("type") == "task"]
     ai_failure = last_capture_ai_failure() if classification_source in {"local_fallback", "image_unavailable"} else {}
@@ -894,7 +909,7 @@ def _capture_diagnostics(classification_source: str, image_count: int, updates: 
             sum(int(update.get("quality_score") or 0) for update in task_updates) / len(task_updates),
             1,
         ) if task_updates else 0,
-        "fallback_reason": "AI unavailable, timed out, or returned unusable output" if classification_source in {"local_fallback", "image_unavailable"} else "",
+        "fallback_reason": _capture_fallback_reason(classification_source, ai_failure),
         "ai_failure": ai_failure,
     }
 
