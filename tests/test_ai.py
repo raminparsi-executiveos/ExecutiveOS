@@ -125,3 +125,22 @@ def test_parse_capture_analysis_json_infers_missing_update_type():
 
     assert analysis.suggested_updates[0].type == 'task'
     assert analysis.suggested_updates[0].title == 'Daily outreach cadence'
+
+
+def test_parse_capture_analysis_json_coerces_human_readable_ids():
+    analysis = _parse_capture_analysis_json('''{
+      "suggested_updates": [{
+        "type": "task",
+        "title": "Update existing pricing task",
+        "matched_record_id": "task#70",
+        "parent_task_id": "parent task 17",
+        "linked_project_ids": ["project#8", 9],
+        "linked_decision_ids": ["decision#3"]
+      }]
+    }''')
+
+    update = analysis.suggested_updates[0]
+    assert update.matched_record_id == 70
+    assert update.parent_task_id == 17
+    assert update.linked_project_ids == [8, 9]
+    assert update.linked_decision_ids == [3]

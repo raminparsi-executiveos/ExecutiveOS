@@ -153,6 +153,24 @@ SUGGESTED_UPDATE_LIST_FIELDS = {
 }
 
 
+def _coerce_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    match = re.search(r"\d+", str(value))
+    return int(match.group(0)) if match else None
+
+
+def _coerce_int_list(value: Any) -> list[int]:
+    ids: list[int] = []
+    for item in _as_list(value):
+        parsed = _coerce_int(item)
+        if parsed is not None and parsed not in ids:
+            ids.append(parsed)
+    return ids
+
+
 def _compact_json_value(value: Any) -> str:
     if value in (None, "", []):
         return ""
@@ -209,6 +227,13 @@ def _normalize_suggested_update_payload(raw_update: Any) -> dict[str, Any]:
     for field in SUGGESTED_UPDATE_LIST_FIELDS:
         if field in update:
             update[field] = _as_list(update[field])
+    for field in ("matched_record_id", "parent_task_id", "quality_score"):
+        if field in update:
+            parsed = _coerce_int(update[field])
+            update[field] = parsed if parsed is not None else (0 if field == "quality_score" else None)
+    for field in ("linked_project_ids", "linked_decision_ids"):
+        if field in update:
+            update[field] = _coerce_int_list(update[field])
     if not update.get("title") and update["type"] != "person" and update.get("name"):
         update["title"] = update["name"]
     if not update.get("name") and update["type"] in {"person", "company"} and update.get("title"):
