@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
-from app.ai import _capture_model_candidates, _openai_image_detail, _openai_timeout_seconds, analyze_capture, last_capture_ai_failure
+from app.ai import CaptureAnalysis, _capture_model_candidates, _openai_image_detail, _openai_timeout_seconds, analyze_capture, last_capture_ai_failure
 
 
 def test_openai_timeout_seconds_defaults_and_clamps(monkeypatch):
@@ -53,3 +53,13 @@ def test_analyze_capture_records_missing_key_failure(monkeypatch):
     failure = last_capture_ai_failure()
     assert failure['reason'] == 'missing_openai_api_key'
     assert failure['attempted_models'] == []
+
+
+def test_capture_analysis_schema_is_strict_for_openai_response_format():
+    schema = CaptureAnalysis.model_json_schema()
+    for definition in [schema, *schema.get('$defs', {}).values()]:
+        properties = set(definition.get('properties', {}))
+        if not properties:
+            continue
+        assert set(definition.get('required', [])) == properties
+        assert definition.get('additionalProperties') is False

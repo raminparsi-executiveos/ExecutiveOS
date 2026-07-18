@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .leadership_lens import leadership_lens_summary
 
@@ -53,7 +53,16 @@ def _capture_model_candidates() -> list[str]:
     return candidates
 
 
+def _strict_json_schema(schema: dict[str, object], _model: type[BaseModel]) -> None:
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        schema["required"] = list(properties.keys())
+    schema["additionalProperties"] = False
+
+
 class SuggestedUpdate(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_strict_json_schema)
+
     type: Literal["person", "company", "strategic_issue", "project", "decision", "meeting", "sop", "document", "metric", "task"]
     name: str = ""
     title: str = ""
@@ -135,6 +144,8 @@ class SuggestedUpdate(BaseModel):
 
 
 class CaptureStatement(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_strict_json_schema)
+
     source_excerpt: str = ""
     statement_type: Literal[
         "fact",
@@ -157,6 +168,8 @@ class CaptureStatement(BaseModel):
 
 
 class CaptureAnalysis(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_strict_json_schema)
+
     suggested_updates: list[SuggestedUpdate]
     follow_ups: list[str] = Field(default_factory=list)
     capture_summary: str = ""
