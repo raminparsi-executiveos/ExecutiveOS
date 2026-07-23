@@ -259,15 +259,40 @@ function itemCount(items) {
   return Array.isArray(items) ? items.length : 0;
 }
 
-function renderPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothing found.') {
+function renderPrepSection(title, items, tone = 'neutral', emptyMessage = 'Nothing found.', renderer = renderListItem) {
+  const actionListClass = renderer === renderPrepActionItem ? ' prep-action-list' : '';
   return `
-    <article class="prep-section prep-${tone}">
+    <article class="prep-section prep-${tone}${actionListClass}">
       <div class="prep-section-heading">
         <h4>${escapeHtml(title)}</h4>
         <span class="count-pill">${itemCount(items)}</span>
       </div>
-      ${renderList(items, emptyMessage)}
+      ${renderList(items, emptyMessage, renderer)}
     </article>
+  `;
+}
+
+function renderPrepActionItem(item) {
+  if (!item || typeof item !== 'object' || !('label' in item)) {
+    return `<span class="prep-action-item prep-action-item-static"><span>${renderListItem(item)}</span></span>`;
+  }
+  const meta = [
+    item.owner ? `Owner: ${item.owner}` : '',
+    item.status ? humanize(item.status) : '',
+    item.due_date ? `Due: ${item.due_date}` : '',
+  ].filter(Boolean);
+  const actionButton = actionControlButton(item);
+  return `
+    <span class="prep-action-item ${actionButton ? 'has-action-control' : ''}">
+      <span class="prep-action-control">${actionButton || '<span class="prep-action-spacer" aria-hidden="true"></span>'}</span>
+      <span class="prep-action-copy">
+        <span class="prep-action-title">
+          ${renderCompanyChip(item.company)}
+          <span>${escapeHtml(item.label)}</span>
+        </span>
+        ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
+      </span>
+    </span>
   `;
 }
 
@@ -337,11 +362,11 @@ function renderMeetingPrepOutput(prep) {
     + itemCount(prep.metrics) + itemCount(risks);
   const commandSections = [
     { title: 'Proposed agenda', items: prep.agenda || [], tone: 'agenda', renderer: renderAgendaSection },
-    { title: 'Action items', items: actionItems, tone: 'action', empty: 'No open action items.' },
+    { title: 'Action items', items: actionItems, tone: 'action', empty: 'No open action items.', itemRenderer: renderPrepActionItem },
     { title: 'Questions to ask', items: prep.questions_to_ask || [], tone: 'decision' },
     { title: 'Open decisions', items: prep.open_decisions || [], tone: 'decision', empty: 'No open decisions.' },
     { title: 'Risks', items: risks, tone: 'risk', empty: 'No risks found.' },
-    { title: 'Overdue tasks', items: overdueTasks, tone: 'risk' },
+    { title: 'Overdue tasks', items: overdueTasks, tone: 'risk', itemRenderer: renderPrepActionItem },
   ].filter((section) => section.title === 'Proposed agenda' || itemCount(section.items) > 0);
   const supportingSections = [
     ['Open commitments', openCommitments, 'action'],
@@ -373,7 +398,7 @@ function renderMeetingPrepOutput(prep) {
         ${commandSections.map((section) => (
           section.renderer
             ? section.renderer(section.items)
-            : renderPrepSection(section.title, section.items, section.tone, section.empty)
+            : renderPrepSection(section.title, section.items, section.tone, section.empty, section.itemRenderer)
         )).join('')}
       </div>
       <details class="supporting-briefing prep-supporting">

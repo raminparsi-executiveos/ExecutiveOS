@@ -555,6 +555,69 @@ select {
   margin-top: 0;
 }
 
+.prep-action-list ul {
+  padding-left: 0;
+  list-style: none;
+}
+
+.prep-action-list li + li {
+  margin-top: 10px;
+}
+
+.prep-action-item {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.prep-action-item-static {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.prep-action-control {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.prep-action-control .item-action-button {
+  width: 100%;
+  min-width: 96px;
+}
+
+.prep-action-spacer {
+  display: block;
+  width: 96px;
+  min-height: 28px;
+}
+
+.prep-action-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.prep-action-title {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.prep-action-title span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.prep-action-copy small {
+  color: #64748b;
+}
+
 .count-pill {
   display: inline-flex;
   align-items: center;
@@ -980,5 +1043,18 @@ pre {
 
   .prep-stack {
     margin-top: 12px;
+  }
+
+  .prep-action-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .prep-action-control {
+    justify-content: flex-start;
+  }
+
+  .prep-action-control .item-action-button {
+    width: auto;
   }
 }
