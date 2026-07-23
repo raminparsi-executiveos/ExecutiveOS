@@ -117,6 +117,53 @@ def test_briefing_clears_reviewed_or_dismissed_leadership_review():
     assert client.get("/briefing").json()["leadership_advisor"] is None
 
 
+def test_briefing_filters_leadership_findings_when_source_item_is_completed():
+    task = create_task("Leadership advisor stale task lacks owner")
+    generated = client.post("/leadership-reviews/generate", json={"review_type": "nightly", "force": True})
+    assert generated.status_code == 200
+
+    briefing = client.get("/briefing").json()
+    assert briefing["leadership_advisor"]
+    assert any(
+        evidence.get("object_type") == "task" and int(evidence.get("object_id")) == task["id"]
+        for finding in briefing["leadership_advisor"]["findings"]
+        for evidence in finding.get("evidence", [])
+    )
+
+    completed = client.post(f"/tasks/{task['id']}/complete")
+    assert completed.status_code == 200
+
+    refreshed = client.get("/briefing").json()
+    assert refreshed["leadership_advisor"] is None
+
+
+def test_briefing_filters_leadership_project_findings_when_project_is_completed():
+    created = client.post("/objects/projects", json={"attributes": {
+        "title": "Leadership advisor stale project",
+        "company": "PEC",
+        "status": "active",
+        "risks": ["Needs owner confirmation"],
+    }})
+    assert created.status_code == 200
+    project = created.json()["object"]
+    generated = client.post("/leadership-reviews/generate", json={"review_type": "nightly", "force": True})
+    assert generated.status_code == 200
+
+    briefing = client.get("/briefing").json()
+    assert briefing["leadership_advisor"]
+    assert any(
+        evidence.get("object_type") == "project" and int(evidence.get("object_id")) == project["id"]
+        for finding in briefing["leadership_advisor"]["findings"]
+        for evidence in finding.get("evidence", [])
+    )
+
+    updated = client.patch(f"/objects/projects/{project['id']}", json={"attributes": {"status": "completed"}})
+    assert updated.status_code == 200
+
+    refreshed = client.get("/briefing").json()
+    assert refreshed["leadership_advisor"] is None
+
+
 def test_leadership_review_lifecycle_and_task_proposals():
     create_task("Leadership advisor proposal task lacks owner")
     generated = client.post("/leadership-reviews/generate", json={"review_type": "manual"})

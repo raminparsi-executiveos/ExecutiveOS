@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .clarification_service import briefing_clarification_items
-from .leadership_service import latest_leadership_review, serialize_leadership_review
+from .leadership_service import active_leadership_review_for_briefing
 from .memory import _result_summary, company_label_for_text
 from .models import BriefingView, CaptureRecord, Decision, Meeting, Metric, Person, Project, ResolvableItem, StrategicIssue, Task
 from .resolution_service import list_resolvable_items
@@ -403,11 +403,11 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
             "capture": list(recent_captures),
         }.items():
             for item in items:
-                    if isinstance(item, Task) and item.status not in OPEN_TASK_STATUSES:
-                        continue
-                    changed_at = _updated_at(item)
-                    if changed_at and changed_at > previous_viewed_at:
-                        changed_since_last.append(_changed_item(item, record_type))
+                if isinstance(item, Task) and item.status not in OPEN_TASK_STATUSES:
+                    continue
+                changed_at = _updated_at(item)
+                if changed_at and changed_at > previous_viewed_at:
+                    changed_since_last.append(_changed_item(item, record_type))
 
     waiting_on = blocked_waiting
     seen_sections: set[tuple[str, Any, str]] = set()
@@ -419,8 +419,8 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     upcoming_section = _without_seen(upcoming, seen_sections, 4)
     clarification_section = briefing_clarification_items(db, limit=5)
     leadership_review = (
-        latest_leadership_review(db, review_type="nightly", status="new")
-        or latest_leadership_review(db, status="new")
+        active_leadership_review_for_briefing(db, review_type="nightly")
+        or active_leadership_review_for_briefing(db)
     )
     priorities = _unique_dashboard_items(needs_attention + delegate_follow_up + context_priorities, 6)
     focus = priorities[0]["title"] if priorities else "Capture the most important current context"
@@ -442,7 +442,7 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
         "changed_since_last_briefing": changed_section,
         "upcoming": upcoming_section,
         "clarifications_needed": clarification_section,
-        "leadership_advisor": serialize_leadership_review(leadership_review) if leadership_review else None,
+        "leadership_advisor": leadership_review,
         "top_priorities": priorities,
         "strategic_issues": [{"label": issue.title, "company": issue.company or ""} for issue in issues[:8]],
         "meetings_today": [{"label": meeting.title, "company": meeting.company or ""} for meeting in meetings_today],

@@ -16,6 +16,7 @@ from .models import (
     Metric,
     Project,
     ReviewAlert,
+    ResolvableItem,
     SOP,
     StrategicIssue,
     Task,
@@ -70,6 +71,57 @@ def _serialize_review(review: LeadershipReview) -> dict[str, Any]:
 
 def serialize_leadership_review(review: LeadershipReview) -> dict[str, Any]:
     return _serialize_review(review)
+
+
+def _evidence_is_actionable(db: Session, evidence: dict[str, Any]) -> bool:
+    object_type = str(evidence.get("object_type") or "")
+    try:
+        object_id = int(str(evidence.get("object_id") or ""))
+    except ValueError:
+        return True
+    if object_type == "task":
+        task = db.get(Task, object_id)
+        return bool(task and task.status in OPEN_TASK_STATUSES)
+    if object_type == "project":
+        project = db.get(Project, object_id)
+        return bool(project and project.status == "active" and (project.risks or not project.owner))
+    if object_type == "strategic_issue":
+        issue = db.get(StrategicIssue, object_id)
+        return bool(issue and issue.status == "active" and (issue.risks or not issue.owner))
+    if object_type == "decision":
+        decision = db.get(Decision, object_id)
+        today = datetime.now(timezone.utc).date().isoformat()
+        return bool(decision and decision.review_date and decision.review_date < today)
+    if object_type == "clarification":
+        clarification = db.get(Clarification, object_id)
+        return bool(clarification and clarification.status == "open")
+    if object_type == "review_alert":
+        alert = db.get(ReviewAlert, object_id)
+        return bool(alert and alert.status == "open")
+    if object_type in {"risk", "meeting_action", "resolvable_item"}:
+        item = db.get(ResolvableItem, object_id)
+        return bool(item and item.status in {"open", "reopened"})
+    return True
+
+
+def active_leadership_review_for_briefing(db: Session, *, review_type: str = "", company: str = "") -> dict[str, Any] | None:
+    review = latest_leadership_review(db, review_type=review_type, status="new", company=company)
+    if not review:
+        return None
+    payload = serialize_leadership_review(review)
+    active_findings = [
+        finding for finding in payload.get("findings", [])
+        if any(_evidence_is_actionable(db, evidence) for evidence in finding.get("evidence", []) or [])
+    ]
+    if not active_findings:
+        return None
+    payload["findings"] = active_findings
+    payload["leadership_signals"] = active_findings
+    payload["strategic_questions"] = payload.get("strategic_questions", [])[: len(active_findings)]
+    payload["missing_context"] = list(dict.fromkeys(
+        context for finding in active_findings for context in (finding.get("missing_context") or [])
+    ))
+    return payload
 
 
 def _evidence(record_type: str, item: Any, label: str = "") -> dict[str, Any]:
