@@ -95,6 +95,28 @@ def test_briefing_surfaces_latest_leadership_review():
     assert briefing["leadership_advisor"]["findings"]
 
 
+def test_briefing_clears_reviewed_or_dismissed_leadership_review():
+    create_task("Leadership advisor clearable briefing task lacks owner")
+    generated = client.post("/leadership-reviews/generate", json={"review_type": "nightly", "force": True})
+    assert generated.status_code == 200
+    review_id = generated.json()["review"]["id"]
+
+    assert client.get("/briefing").json()["leadership_advisor"]["id"] == review_id
+
+    reviewed = client.post(f"/leadership-reviews/{review_id}/review")
+    assert reviewed.status_code == 200
+    assert client.get("/briefing").json()["leadership_advisor"] is None
+
+    regenerated = client.post("/leadership-reviews/generate", json={"review_type": "nightly", "force": True})
+    assert regenerated.status_code == 200
+    dismissed_id = regenerated.json()["review"]["id"]
+    assert client.get("/briefing").json()["leadership_advisor"]["id"] == dismissed_id
+
+    dismissed = client.post(f"/leadership-reviews/{dismissed_id}/dismiss")
+    assert dismissed.status_code == 200
+    assert client.get("/briefing").json()["leadership_advisor"] is None
+
+
 def test_leadership_review_lifecycle_and_task_proposals():
     create_task("Leadership advisor proposal task lacks owner")
     generated = client.post("/leadership-reviews/generate", json={"review_type": "manual"})

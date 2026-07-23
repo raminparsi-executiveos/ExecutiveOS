@@ -489,8 +489,14 @@ def list_leadership_reviews(
     return query.order_by(LeadershipReview.generated_at.desc(), LeadershipReview.id.desc()).limit(limit).all()
 
 
-def latest_leadership_review(db: Session, *, review_type: str = "", company: str = "") -> LeadershipReview | None:
-    reviews = list_leadership_reviews(db, review_type=review_type, company=company, limit=1)
+def latest_leadership_review(
+    db: Session,
+    *,
+    review_type: str = "",
+    status: str = "",
+    company: str = "",
+) -> LeadershipReview | None:
+    reviews = list_leadership_reviews(db, review_type=review_type, status=status, company=company, limit=1)
     return reviews[0] if reviews else None
 
 

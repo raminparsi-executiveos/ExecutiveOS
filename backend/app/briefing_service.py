@@ -418,7 +418,10 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
     changed_section = _without_seen(changed_since_last, seen_sections, 4)
     upcoming_section = _without_seen(upcoming, seen_sections, 4)
     clarification_section = briefing_clarification_items(db, limit=5)
-    leadership_review = latest_leadership_review(db, review_type="nightly") or latest_leadership_review(db)
+    leadership_review = (
+        latest_leadership_review(db, review_type="nightly", status="new")
+        or latest_leadership_review(db, status="new")
+    )
     priorities = _unique_dashboard_items(needs_attention + delegate_follow_up + context_priorities, 6)
     focus = priorities[0]["title"] if priorities else "Capture the most important current context"
 
