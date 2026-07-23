@@ -202,8 +202,8 @@ function renderCompactItem(item) {
           <span>${escapeHtml(item.label)}</span>
         </span>
         ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
-        ${actionButton ? `<span class="item-action-row">${actionButton}</span>` : ''}
       </span>
+      ${actionButton ? `<span class="item-action-row">${actionButton}</span>` : ''}
     </span>
   `;
 }
@@ -284,7 +284,6 @@ function renderPrepActionItem(item) {
   const actionButton = actionControlButton(item);
   return `
     <span class="prep-action-item ${actionButton ? 'has-action-control' : ''}">
-      <span class="prep-action-control">${actionButton || '<span class="prep-action-spacer" aria-hidden="true"></span>'}</span>
       <span class="prep-action-copy">
         <span class="prep-action-title">
           ${renderCompanyChip(item.company)}
@@ -292,6 +291,7 @@ function renderPrepActionItem(item) {
         </span>
         ${meta.length ? `<small>${meta.map(escapeHtml).join(' · ')}</small>` : ''}
       </span>
+      <span class="prep-action-control">${actionButton || '<span class="prep-action-spacer" aria-hidden="true"></span>'}</span>
     </span>
   `;
 }

@@ -317,6 +317,22 @@ select {
   overflow-wrap: anywhere;
 }
 
+.briefing-section .dashboard-item-main,
+.briefing-details .dashboard-item-main,
+.prep-section .dashboard-item-main {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.briefing-section .dashboard-item-main .company-chip,
+.briefing-section .dashboard-item-main .score-pill,
+.briefing-details .dashboard-item-main .company-chip,
+.briefing-details .dashboard-item-main .score-pill,
+.prep-section .dashboard-item-main .company-chip,
+.prep-section .dashboard-item-main .score-pill {
+  justify-self: start;
+}
+
 .item-action-button {
   display: inline-flex;
   align-items: center;
@@ -349,21 +365,23 @@ select {
 
 .actionable-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
 }
 
 .actionable-copy {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 4px;
 }
 
 .actionable-title {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  align-items: start;
 }
 
 .actionable-title span:last-child {
@@ -377,9 +395,9 @@ select {
 
 .item-action-row {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
-  margin-top: 3px;
+  margin-top: 0;
   min-width: 0;
 }
 
@@ -494,6 +512,7 @@ select {
 
 .prep-command-grid {
   align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .agenda-panel, .prep-section {
@@ -566,7 +585,7 @@ select {
 
 .prep-action-item {
   display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) max-content;
   gap: 12px;
   align-items: start;
   min-width: 0;
@@ -581,11 +600,10 @@ select {
   display: flex;
   justify-content: flex-start;
   min-width: 0;
-  padding-top: 1px;
+  padding-top: 0;
 }
 
 .prep-action-control .item-action-button {
-  width: 100%;
   min-width: 96px;
 }
 
@@ -603,9 +621,9 @@ select {
 
 .prep-action-title {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px;
-  align-items: baseline;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  align-items: start;
   min-width: 0;
 }
 
@@ -1056,5 +1074,10 @@ pre {
 
   .prep-action-control .item-action-button {
     width: auto;
+  }
+
+  .actionable-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
   }
 }
