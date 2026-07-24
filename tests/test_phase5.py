@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -7,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from app.main import app
 from app.ai import CaptureAnalysis, SuggestedUpdate
-from app.models import Company
+from app.models import CaptureRecord, Company
 from app.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -237,6 +238,36 @@ def test_general_company_meeting_prep_includes_unresolved_older_context():
 
     prep = client.post('/meeting-prep', json={'meeting': 'PEC leadership review'}).json()
     assert 'PEC older active initiative 0' in prep['related_projects']
+
+
+def test_meeting_prep_deduplicates_repeated_risks_and_details():
+    for _ in range(3):
+        response = client.post('/objects/projects', json={'attributes': {
+            'title': 'PEC repeated migration project',
+            'company': 'PEC',
+            'status': 'active',
+            'objective': 'Migrate sales reporting cleanly.',
+            'risks': ['Duplicate migration delay'],
+        }})
+        assert response.status_code == 200
+
+    prep = client.post('/meeting-prep', json={'meeting': 'PEC weekly sales meeting'}).json()
+    assert prep['risks'].count('Duplicate migration delay') == 1
+    assert [item['label'] for item in prep['risks_detail']].count('Duplicate migration delay') == 1
+
+
+def test_meeting_prep_suppresses_older_capture_context_contradicted_by_newer_capture():
+    now = datetime.now(timezone.utc)
+    db = SessionLocal()
+    try:
+        db.add(CaptureRecord(raw_text='Julio is with RYSE.', created_at=now - timedelta(days=1)))
+        db.add(CaptureRecord(raw_text='Julio is with Pro Engineering, not RYSE.', created_at=now))
+        db.commit()
+    finally:
+        db.close()
+
+    prep = client.post('/meeting-prep', json={'meeting': 'RYSE leadership meeting'}).json()
+    assert 'Julio is with RYSE.' not in prep['recent_capture_context']
 
 
 def test_unknown_meeting_context_returns_clean_empty_sections():

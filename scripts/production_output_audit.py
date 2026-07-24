@@ -61,6 +61,11 @@ def labels(items: list[dict[str, Any]], limit: int = 12) -> list[str]:
     return output
 
 
+def unique_count(values: list[str]) -> tuple[int, int]:
+    normalized = [" ".join(value.lower().split()) for value in values if value]
+    return len(normalized), len(set(normalized))
+
+
 def print_json_summary(name: str, value: Any, limit: int = 4000) -> None:
     rendered = json.dumps(value, indent=2, sort_keys=True, default=str)
     print(f"{name}:")
@@ -138,6 +143,22 @@ def audit_captures(db) -> None:
             )
         print()
 
+    raw_texts = [" ".join((capture.raw_text or "").lower().split()) for capture in db.query(CaptureRecord).all()]
+    total, unique = unique_count(raw_texts)
+    print(f"capture_duplicate_ratio: total={total} unique={unique} duplicates={total - unique}")
+    source_counts = Counter(capture.classification_source or "unknown" for capture in db.query(CaptureRecord).all())
+    mutation_counts = Counter(
+        f"{mutation.object_type}:{mutation.operation}:{mutation.status}"
+        for mutation in db.query(CaptureMutation).all()
+    )
+    captures_with_mutations = {
+        mutation.capture_id for mutation in db.query(CaptureMutation.capture_id).distinct().all()
+    }
+    total_captures = db.query(CaptureRecord).count()
+    print(f"classification_sources: {dict(source_counts)}")
+    print(f"mutation_status_mix: {dict(mutation_counts.most_common(20))}")
+    print(f"captures_without_mutations: {total_captures - len(captures_with_mutations)} of {total_captures}")
+
 
 def audit_tasks(db) -> None:
     section("Task Quality and Created Items")
@@ -158,22 +179,34 @@ def audit_morning_brief(db) -> None:
     section("Morning Brief Output")
     briefing = build_ranked_briefing(db, username=os.getenv("EXECUTIVEOS_USERNAME", "admin"))
     keys = [
-        "needs_attention",
-        "delegate_follow_up",
-        "blocked_waiting",
+        "needs_your_attention",
+        "delegate_or_follow_up",
+        "blocked_or_waiting",
         "overdue",
         "upcoming",
-        "context_priorities",
-        "recent_changes",
+        "changed_since_last_briefing",
+        "clarifications_needed",
+        "top_priorities",
     ]
     for key in keys:
         items = briefing.get(key) or []
         print(f"{key}: count={len(items)}")
-        for line in labels(items, 12):
+        for item in items[:12]:
+            title = item.get("title") or item.get("label") or str(item)
+            company = item.get("company") or ""
+            owner = item.get("owner") or ""
+            status = item.get("status") or ""
+            meta = " | ".join(part for part in (company, owner, status) if part)
+            line = f"{title}{f' ({meta})' if meta else ''}"
             print(f"  - {line}")
+            if item.get("display_reason"):
+                print(f"    why: {item['display_reason']}")
+    if briefing.get("leadership_advisor"):
+        advisor = briefing["leadership_advisor"]
+        print(f"leadership_advisor: id={advisor.get('id')} findings={len(advisor.get('findings') or [])}")
     print_json_summary("briefing_metadata", {
         key: briefing.get(key)
-        for key in ("generated_at", "last_viewed_at", "clarifications_needed")
+        for key in ("generated_at", "previous_viewed_at", "recommended_focus")
         if key in briefing
     }, limit=1500)
 
@@ -195,7 +228,9 @@ def audit_meeting_prep(db) -> None:
             "recent_capture_context",
         ):
             value = prep.get(key) or []
-            print(f"{key}: count={len(value)}")
+            total, unique = unique_count([str(item) for item in value])
+            suffix = f" unique={unique}" if total != unique else ""
+            print(f"{key}: count={len(value)}{suffix}")
             for item in value[:10]:
                 print(f"  - {short(item, 180)}")
         for key in ("action_items_detail", "open_commitments_detail", "overdue_tasks_detail", "risks_detail"):

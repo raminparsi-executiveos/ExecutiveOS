@@ -113,6 +113,7 @@ from .resolution_service import (
     serialize_resolvable_item,
 )
 from .memory import (
+    COMPANY_ALIASES,
     SEARCH_CONFIG,
     _answer_for_ranked_items,
     _belongs_to_company,
@@ -1256,6 +1257,74 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
     topic_query = _meeting_topic_query(meeting_title, company_name) if company_name else ""
     context_query = topic_query or meeting_title
 
+    def normalize_label(value: Any) -> str:
+        return " ".join(str(value or "").lower().split())
+
+    def unique_strings(values: list[Any], limit: int = 8) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text_value = " ".join(str(value or "").split())
+            key = normalize_label(text_value)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(text_value)
+            if len(unique) == limit:
+                break
+        return unique
+
+    def unique_details(values: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+        unique: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in values:
+            key = (
+                normalize_label(item.get("record_type") or ""),
+                normalize_label(item.get("company") or ""),
+                normalize_label(item.get("label") or item.get("title") or ""),
+            )
+            if not key[2] or key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+            if len(unique) == limit:
+                break
+        return unique
+
+    def capture_negates_company(capture: CaptureRecord, company: str) -> set[str]:
+        negated_people: set[str] = set()
+        if not company:
+            return negated_people
+        aliases = [alias for alias, canonical in COMPANY_ALIASES.items() if canonical == company]
+        if not aliases:
+            aliases = [company]
+        pattern = "(?:" + "|".join(re.escape(alias) for alias in aliases) + ")"
+        match = re.search(
+            rf"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\s+is\s+(?:with\s+[^.]+,\s*)?not\s+{pattern}\b",
+            capture.raw_text,
+            flags=re.IGNORECASE,
+        )
+        if match and match.group(1):
+            negated_people.add(normalize_label(match.group(1)))
+        return negated_people
+
+    def filter_superseded_captures(captures: list[CaptureRecord], company: str) -> list[CaptureRecord]:
+        if not company:
+            return captures
+        suppressed_people: set[str] = set()
+        filtered: list[CaptureRecord] = []
+        for capture in sorted(captures, key=lambda item: item.created_at, reverse=True):
+            capture_people = {
+                normalize_label(person.name)
+                for person in db.query(Person).all()
+                if re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE)
+            }
+            if capture_people & suppressed_people:
+                continue
+            filtered.append(capture)
+            suppressed_people.update(capture_negates_company(capture, company))
+        return filtered
+
     def scoped_items(model: type[Any]) -> list[Any]:
         items = db.query(model).all()
         return [item for item in items if _belongs_to_company(item, company_name)] if company_name else items
@@ -1303,21 +1372,19 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
 
     capture_candidates = scoped_items(CaptureRecord)
     minimum_capture_score = 1 if company_name and not topic_query else 3 if company_name else 6
-    captures = _unique_captures([
+    captures = _unique_captures(filter_superseded_captures([
         capture for capture in _rank_for_context(capture_candidates, ["raw_text"], context_query)
         if _match_score(capture, ["raw_text"], context_query) >= minimum_capture_score
-    ])
+    ], company_name))
     capture_people = [
         person.name
         for person in db.query(Person).all()
         if any(re.search(rf"\b{re.escape(person.name)}\b", capture.raw_text, flags=re.IGNORECASE) for capture in captures)
     ]
-    action_items = [
-        item for item in list(dict.fromkeys(
+    action_items = unique_strings(
         [task.title for task in tasks] +
         [item.display_text for item in meeting_action_items]
-        ))
-    ]
+    )
     task_by_title = {task.title.lower(): task for task in tasks}
     for meeting in meetings:
         for action_item in meeting.action_items or []:
@@ -1364,9 +1431,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
             })
         return detail
 
-    risks = [
-        risk.display_text for risk in risk_resolvables
-    ]
+    risks = unique_strings([risk.display_text for risk in risk_resolvables])
     risk_details = [
         {
             "label": risk.display_text,
@@ -1425,17 +1490,19 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "metrics": "Current metrics and company KPIs related to the meeting context.",
         "risks": "Explicit risks attached to active issues or projects.",
     }
+    question_values = unique_strings(
+        [clarification.question for clarification in relevant_clarifications] +
+        [question for meeting in meetings for question in (meeting.open_questions or [])] +
+        [f"What decision is needed on {decision}?" for decision in related_decisions[:3]] +
+        [f"What is blocking {task}?" for task in overdue_tasks[:3]]
+    )
+    recent_relevant_changes = unique_strings([_result_summary(capture) for capture in captures], limit=5)
     dynamic_sections = {
         "meeting_objective": f"Prepare for a {meeting_type} about {meeting_title}.",
         "desired_outcome": "Leave with owners, decisions, risks, and next actions confirmed.",
         "decisions_required": related_decisions,
         "recommended_agenda": agenda,
-        "questions_to_ask": list(dict.fromkeys(
-            [clarification.question for clarification in relevant_clarifications] +
-            [question for meeting in meetings for question in (meeting.open_questions or [])] +
-            [f"What decision is needed on {decision}?" for decision in related_decisions[:3]] +
-            [f"What is blocking {task}?" for task in overdue_tasks[:3]]
-        ))[:8],
+        "questions_to_ask": question_values,
         "open_commitments": open_commitments[:8],
         "overdue_tasks": overdue_tasks[:8],
         "relevant_metrics": metric_summaries,
@@ -1445,7 +1512,7 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
             if not company_name or alert.description.lower().find(company_name.lower()) >= 0
         ][:5],
         "sensitive_people_context": people_context,
-        "recent_relevant_changes": [_result_summary(capture) for capture in captures],
+        "recent_relevant_changes": recent_relevant_changes,
         "suggested_follow_up_actions": [
             "Assign owners to unresolved commitments.",
             "Record decisions and task changes immediately after the meeting.",
@@ -1465,14 +1532,14 @@ def meeting_prep(payload: MeetingPrepRequest, db: Session = Depends(get_db), _us
         "related_projects": related_projects,
         "open_decisions": related_decisions,
         "recent_meeting_context": [meeting.summary for meeting in meetings if meeting.summary][:3],
-        "recent_capture_context": [_result_summary(capture) for capture in captures],
+        "recent_capture_context": recent_relevant_changes,
         "action_items": action_items[:8],
-        "action_items_detail": [task_detail(item) for item in action_items[:8]],
+        "action_items_detail": unique_details([task_detail(item) for item in action_items[:8]]),
         "metrics": metric_summaries,
         "risks": risks[:5],
-        "risks_detail": risk_details[:5],
-        "open_commitments_detail": open_commitment_details[:8],
-        "overdue_tasks_detail": overdue_task_details[:8],
+        "risks_detail": unique_details(risk_details, limit=5),
+        "open_commitments_detail": unique_details(open_commitment_details[:8]),
+        "overdue_tasks_detail": unique_details(overdue_task_details[:8]),
         "clarifications_needed": [
             serialize_clarification(clarification)
             for clarification in relevant_clarifications

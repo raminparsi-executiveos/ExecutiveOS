@@ -230,7 +230,7 @@ def _unique_dashboard_items(items: list[dict[str, Any]], limit: int) -> list[dic
     seen = set()
     unique = []
     for item in sorted(items, key=lambda value: (value["score"], value.get("record_id") or 0), reverse=True):
-        identity = (item["record_type"], item["record_id"], item["title"])
+        identity = _dashboard_identity(item)
         if identity in seen:
             continue
         seen.add(identity)
@@ -240,10 +240,18 @@ def _unique_dashboard_items(items: list[dict[str, Any]], limit: int) -> list[dic
     return unique
 
 
+def _dashboard_identity(item: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        " ".join(str(item.get("record_type") or "").lower().split()),
+        " ".join(str(item.get("company") or "").lower().split()),
+        " ".join(str(item.get("title") or item.get("label") or "").lower().split()),
+    )
+
+
 def _without_seen(items: list[dict[str, Any]], seen: set[tuple[str, Any, str]], limit: int) -> list[dict[str, Any]]:
     selected = []
     for item in _unique_dashboard_items(items, len(items)):
-        identity = (item["record_type"], item.get("record_id"), item["title"])
+        identity = _dashboard_identity(item)
         if identity in seen:
             continue
         seen.add(identity)
@@ -251,6 +259,24 @@ def _without_seen(items: list[dict[str, Any]], seen: set[tuple[str, Any, str]], 
         if len(selected) == limit:
             break
     return selected
+
+
+def _with_display_diagnostics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched = []
+    for item in items:
+        source = item.get("source") or {}
+        enriched.append(item | {
+            "display_reason": {
+                "record_type": item.get("record_type", ""),
+                "record_id": item.get("record_id"),
+                "status": item.get("status", ""),
+                "score": item.get("score", 0),
+                "score_reasons": item.get("score_reasons", []),
+                "source_type": source.get("type", ""),
+                "source_id": source.get("id", ""),
+            }
+        })
+    return enriched
 
 
 def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
@@ -411,13 +437,13 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
 
     waiting_on = blocked_waiting
     seen_sections: set[tuple[str, Any, str]] = set()
-    needs_your_attention = _without_seen(needs_attention, seen_sections, 4)
-    delegate_or_follow_up = _without_seen(delegate_follow_up, seen_sections, 4)
-    overdue_section = _without_seen(overdue, seen_sections, 4)
-    blocked_or_waiting = _without_seen(blocked_waiting, seen_sections, 4)
-    changed_section = _without_seen(changed_since_last, seen_sections, 4)
-    upcoming_section = _without_seen(upcoming, seen_sections, 4)
-    clarification_section = briefing_clarification_items(db, limit=5)
+    needs_your_attention = _with_display_diagnostics(_without_seen(needs_attention, seen_sections, 4))
+    delegate_or_follow_up = _with_display_diagnostics(_without_seen(delegate_follow_up, seen_sections, 4))
+    overdue_section = _with_display_diagnostics(_without_seen(overdue, seen_sections, 4))
+    blocked_or_waiting = _with_display_diagnostics(_without_seen(blocked_waiting, seen_sections, 4))
+    changed_section = _with_display_diagnostics(_without_seen(changed_since_last, seen_sections, 4))
+    upcoming_section = _with_display_diagnostics(_without_seen(upcoming, seen_sections, 4))
+    clarification_section = _with_display_diagnostics(_unique_dashboard_items(briefing_clarification_items(db, limit=20), 5))
     leadership_review = (
         active_leadership_review_for_briefing(db, review_type="nightly")
         or active_leadership_review_for_briefing(db)
@@ -456,7 +482,7 @@ def build_ranked_briefing(db: Session, username: str) -> dict[str, Any]:
             for person in people
             if person.concerns
         ][:5],
-        "waiting_on_items": waiting_on[:8],
+        "waiting_on_items": _with_display_diagnostics(_unique_dashboard_items(waiting_on, 8)),
         "open_tasks": [
             {
                 "label": task.title,

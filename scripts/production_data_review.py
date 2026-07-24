@@ -56,8 +56,26 @@ def optional_count_sql(table_name: str, inspector) -> str:
     return f"select '{table_name}' as table_name, null as count"
 
 
+def newline_expr(engine) -> str:
+    return "char(10)" if engine.dialect.name == "sqlite" else "chr(10)"
+
+
+def left_expr(engine, value: str, limit: int) -> str:
+    if engine.dialect.name == "sqlite":
+        return f"substr({value}, 1, {limit})"
+    return f"left({value}, {limit})"
+
+
+def id_agg_expr(engine) -> str:
+    if engine.dialect.name == "sqlite":
+        return "group_concat(id, ',')"
+    return "string_agg(id::text, ',' order by id)"
+
+
 def main() -> None:
     engine = create_engine(database_url(), pool_pre_ping=True)
+    newline = newline_expr(engine)
+    ids = id_agg_expr(engine)
 
     with engine.connect() as conn:
         inspector = inspect(conn)
@@ -90,9 +108,10 @@ def main() -> None:
         section("Latest Captures")
         capture_cols = columns(inspector, "capture_records")
         if capture_cols:
-            screenshot_expr = "left(coalesce(screenshot_summary, ''), 90)" if "screenshot_summary" in capture_cols else "''"
             prompt_expr = "coalesce(prompt_version, '')" if "prompt_version" in capture_cols else "''"
             model_expr = "coalesce(ai_model, '')" if "ai_model" in capture_cols else "''"
+            raw_preview = left_expr(engine, f"replace(coalesce(raw_text, ''), {newline}, ' ')", 180)
+            screenshot_preview = left_expr(engine, "coalesce(screenshot_summary, '')", 90)
             print_rows(run(conn, f"""
                 select
                     id,
@@ -101,17 +120,17 @@ def main() -> None:
                     coalesce(saved_count, 0) as saved_count,
                     {model_expr} as model,
                     {prompt_expr} as prompt,
-                    left(replace(coalesce(raw_text, ''), chr(10), ' '), 180) as raw_text,
-                    {screenshot_expr} as screenshot_summary
+                    {raw_preview} as raw_text,
+                    {screenshot_preview if "screenshot_summary" in capture_cols else "''"} as screenshot_summary
                 from capture_records
                 order by id desc
                 limit 20
             """))
 
             section("Repeated Raw Captures")
-            print_rows(run(conn, """
+            print_rows(run(conn, f"""
                 select
-                    left(replace(coalesce(raw_text, ''), chr(10), ' '), 180) as raw_text,
+                    {raw_preview} as raw_text,
                     count(*) as count,
                     min(id) as first_id,
                     max(id) as last_id
@@ -145,7 +164,9 @@ def main() -> None:
             """))
 
             section("Latest Capture Mutations")
-            print_rows(run(conn, """
+            evidence_preview = left_expr(engine, "coalesce(evidence_excerpt, '')", 120)
+            explanation_preview = left_expr(engine, "coalesce(explanation, '')", 120)
+            print_rows(run(conn, f"""
                 select
                     id,
                     capture_id,
@@ -153,8 +174,8 @@ def main() -> None:
                     operation,
                     status,
                     match_confidence,
-                    left(coalesce(evidence_excerpt, ''), 120) as evidence,
-                    left(coalesce(explanation, ''), 120) as explanation,
+                    {evidence_preview} as evidence,
+                    {explanation_preview} as explanation,
                     saved_record_type,
                     saved_record_id
                 from capture_mutations
@@ -181,6 +202,7 @@ def main() -> None:
             print_rows(run(conn, quality_sql))
 
             print("\nLatest tasks:")
+            next_action_preview = left_expr(engine, "coalesce(next_action, '')", 100)
             fields = [
                 "id",
                 "title",
@@ -189,11 +211,12 @@ def main() -> None:
                 "status",
                 "priority",
                 "due_date",
-                "left(coalesce(next_action, ''), 100) as next_action",
+                f"{next_action_preview} as next_action",
             ]
             for optional in ("definition_of_done", "why_it_matters", "source_excerpt", "confidence"):
                 if optional in task_cols:
-                    fields.append(f"left(coalesce({optional}, ''), 100) as {optional}")
+                    optional_preview = left_expr(engine, f"coalesce({optional}, '')", 100)
+                    fields.append(f"{optional_preview} as {optional}")
             print_rows(run(conn, f"""
                 select {', '.join(fields)}
                 from tasks
@@ -220,7 +243,7 @@ def main() -> None:
                         lower(coalesce({title_col}, '')) as normalized_title,
                         lower(coalesce({company_col}, '')) as normalized_company,
                         count(*) as count,
-                        string_agg(id::text, ',' order by id) as ids
+                        {ids} as ids
                     from {table_name}
                     group by lower(coalesce({title_col}, '')), lower(coalesce({company_col}, ''))
                     having count(*) > 1
@@ -237,7 +260,8 @@ def main() -> None:
                 order by count desc
             """))
             print("\nLatest open resolvable items:")
-            print_rows(run(conn, """
+            display_text_preview = left_expr(engine, "coalesce(display_text, '')", 160)
+            print_rows(run(conn, f"""
                 select
                     id,
                     parent_type,
@@ -245,7 +269,7 @@ def main() -> None:
                     item_type,
                     company,
                     status,
-                    left(coalesce(display_text, ''), 160) as display_text
+                    {display_text_preview} as display_text
                 from resolvable_items
                 where coalesce(status, '') <> 'resolved'
                 order by id desc

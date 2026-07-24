@@ -44,9 +44,12 @@ from app.models import (
     CaptureInterpretation,
     CaptureMutation,
     CaptureRecord,
+    Clarification,
     Company,
     Decision,
     Document,
+    EntityAlias,
+    LeadershipReview,
     Meeting,
     Metric,
     Person,
@@ -254,6 +257,37 @@ def rewrite_references(db, object_type: str, old_id: int, new_id: int) -> int:
     ):
         item.parent_id = new_id
         changed += 1
+    for clarification in db.query(Clarification).filter(
+        Clarification.target_record_type == object_type,
+        Clarification.target_record_id == old_id,
+    ):
+        clarification.target_record_id = new_id
+        changed += 1
+    for alias in db.query(EntityAlias).filter(
+        EntityAlias.entity_type == object_type,
+        EntityAlias.entity_id == old_id,
+    ):
+        alias.entity_id = new_id
+        changed += 1
+    for review in db.query(LeadershipReview).all():
+        changed_review = False
+        findings = list(review.findings or [])
+        for finding in findings:
+            for evidence in finding.get("evidence", []) or []:
+                if evidence.get("object_type") == object_type and str(evidence.get("object_id")) == str(old_id):
+                    evidence["object_id"] = str(new_id)
+                    changed_review = True
+        source_record_ids = []
+        for source in review.source_record_ids or []:
+            if source.get("type") == object_type and str(source.get("id")) == str(old_id):
+                source = {**source, "id": new_id}
+                changed_review = True
+            source_record_ids.append(source)
+        if changed_review:
+            review.findings = findings
+            review.source_record_ids = source_record_ids
+            db.add(review)
+            changed += 1
     return changed
 
 

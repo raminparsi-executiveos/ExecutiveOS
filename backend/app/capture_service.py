@@ -256,8 +256,20 @@ def _upsert_company(db: Session, name: str) -> Company:
     return company
 
 
+def _normalized_identity(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _company_filter(query: Any, model: type[Any], company: str) -> Any:
+    if not company or "company" not in model.__table__.columns:
+        return query
+    return query.filter(model.company.ilike(company))
+
+
 def _upsert_person(db: Session, name: str, company: str = "", responsibilities: list[str] | None = None, current_priorities: list[str] | None = None) -> Person:
-    person = db.query(Person).filter(Person.name.ilike(name)).first()
+    query = db.query(Person).filter(Person.name.ilike(name))
+    company_match = _company_filter(query, Person, company).order_by(Person.id.desc()).first() if company else None
+    person = company_match or query.order_by(Person.id.desc()).first()
     if not person:
         person = Person(name=name)
     person.company = company or person.company
@@ -276,7 +288,9 @@ def _upsert_person(db: Session, name: str, company: str = "", responsibilities: 
 
 
 def _upsert_strategic_issue(db: Session, title: str, company: str = "", owner: str = "") -> StrategicIssue:
-    issue = db.query(StrategicIssue).filter(StrategicIssue.title.ilike(title)).first()
+    query = db.query(StrategicIssue).filter(StrategicIssue.title.ilike(title))
+    company_match = _company_filter(query, StrategicIssue, company).order_by(StrategicIssue.id.desc()).first() if company else None
+    issue = company_match or query.order_by(StrategicIssue.id.desc()).first()
     if not issue:
         issue = StrategicIssue(title=title)
     issue.company = company or issue.company
@@ -289,7 +303,9 @@ def _upsert_strategic_issue(db: Session, title: str, company: str = "", owner: s
 
 
 def _upsert_decision(db: Session, title: str, company: str, context: str, final_decision: str, reasoning: str) -> Decision:
-    decision = db.query(Decision).filter(Decision.title.ilike(title)).first()
+    query = db.query(Decision).filter(Decision.title.ilike(title))
+    company_match = _company_filter(query, Decision, company).order_by(Decision.id.desc()).first() if company else None
+    decision = company_match or query.order_by(Decision.id.desc()).first()
     if not decision:
         decision = Decision(title=title)
     decision.company = company or decision.company
@@ -301,6 +317,25 @@ def _upsert_decision(db: Session, title: str, company: str, context: str, final_
     db.flush()
     db.refresh(decision)
     return decision
+
+
+def _find_existing_generic_instance(db: Session, model: type[Any], identity_field: str, identity: str, update: dict[str, Any]) -> Any | None:
+    query = db.query(model).filter(getattr(model, identity_field).ilike(identity))
+    company = update.get("company") or ""
+    if company and "company" in model.__table__.columns:
+        company_match = query.filter(model.company.ilike(company))
+        if model is Meeting and update.get("date"):
+            dated = company_match.filter(Meeting.date == update.get("date")).order_by(Meeting.id.desc()).first()
+            if dated:
+                return dated
+        match = company_match.order_by(getattr(model, "id").desc()).first()
+        if match:
+            return match
+    if model is Meeting and update.get("date"):
+        dated = query.filter(Meeting.date == update.get("date")).order_by(Meeting.id.desc()).first()
+        if dated:
+            return dated
+    return query.order_by(getattr(model, "id").desc()).first()
 
 
 def _detect_known_person_name(text: str) -> str:
@@ -1206,7 +1241,7 @@ def _apply_generic_update(db: Session, update: dict[str, Any]) -> Any | bool:
     identity = update.get(identity_field) or update.get("title") or update.get("name")
     if not identity:
         return True
-    instance = db.query(model).filter(getattr(model, identity_field).ilike(identity)).first()
+    instance = _find_existing_generic_instance(db, model, identity_field, identity, update)
     if not instance:
         instance = model(**{identity_field: identity})
     allowed = {column.name for column in model.__table__.columns} - {"id", identity_field}

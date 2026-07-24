@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -14,12 +15,13 @@ client = TestClient(app)
 
 
 def test_tasks_can_be_created_completed_reopened_and_deleted():
+    future_due_date = (date.today() + timedelta(days=7)).isoformat()
     created = client.post('/objects/tasks', json={'attributes': {
         'title': 'Kyle will send the revised client-retention plan',
         'description': 'Send revised client-retention plan.',
         'company': 'PEC',
         'owner': 'Kyle',
-        'due_date': '2026-07-20',
+        'due_date': future_due_date,
         'status': 'open',
         'priority': 'high',
         'source_type': 'manual',
